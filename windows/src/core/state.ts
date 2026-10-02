@@ -59,6 +59,7 @@ const task = (
 /** AgentTask.integrationAgents — same ids, names and colours as macOS. */
 export const INTEGRATION_AGENTS: AgentTask[] = [
   task("integration_claude", "VS Code", "#F5F6F8", "claudeCode"),
+  task("agent_codex", "Codex", "#E879F9", "agent"),
   task("integration_resend", "Resend", "#22C55E", "n8n"),
   task("integration_n8n", "n8n", "#F29B38", "n8n"),
   task("integration_vercel", "Vercel", "#7C5CFF", "n8n"),
@@ -203,7 +204,9 @@ class AppState {
   loadIntegrationTasks() {
     for (const proto of INTEGRATION_AGENTS) {
       const shouldLoad =
-        proto.id === "integration_claude" || this.settings.activeIntegrations.includes(proto.id);
+  proto.id === "integration_claude" ||
+  proto.id === "agent_codex" ||
+  this.settings.activeIntegrations.includes(proto.id);
       const idx = this.tasks.findIndex((t) => t.id === proto.id);
       if (shouldLoad && idx < 0) this.tasks.push({ ...proto, steps: [] });
       if (!shouldLoad && idx >= 0) this.tasks.splice(idx, 1);
@@ -224,17 +227,43 @@ class AppState {
       // both known integrations → declaration order
       return order.indexOf(a.id) - order.indexOf(b.id);
     });
-    if (!this.focusId) this.focusId = "integration_claude";
+    if (!this.focusId) {
+  this.focusId = this.tasks.some((t) => t.id === "agent_codex")
+    ? "agent_codex"
+    : "integration_claude";
+}
     this.notify();
   }
 
   removeTask(id: string) {
-    const idx = this.tasks.findIndex((t) => t.id === id);
-    if (idx < 0) return;
-    this.tasks.splice(idx, 1);
-    if (this.focusId === id) this.focusId = this.tasks[0]?.id ?? "integration_claude";
+  const idx = this.tasks.findIndex((t) => t.id === id);
+  if (idx < 0) return;
+
+  const persistent =
+    id === "integration_claude" ||
+    id === "agent_codex" ||
+    this.settings.activeIntegrations.includes(id);
+
+  if (persistent) {
+    const t = this.tasks[idx];
+    t.state = "idle";
+    t.steps = [];
+    t.stepIndex = 0;
+    t.pillBadge = null;
     this.notify();
+    return;
   }
+
+  this.tasks.splice(idx, 1);
+
+  if (this.focusId === id) {
+    this.focusId = this.tasks.some((t) => t.id === "agent_codex")
+      ? "agent_codex"
+      : this.tasks[0]?.id ?? "integration_claude";
+  }
+
+  this.notify();
+}
 
   /** Creates a dynamic agent_ pill on first event; no-ops if it already exists.
    *  Inserted right after integration_claude so it appears in the visible slice(0,4). */

@@ -7,18 +7,22 @@ import { Bridge, onEvent } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Island } from "./island";
+import { CodexSessions } from "./codex-sessions";
 
 const CLAUDE_ID = "integration_claude";
 
 /** Clears the approval card if no decision was made before the hook gave up. */
 let pendingTimeout: number | null = null;
 
-interface HookPayload {
+export interface HookPayload {
   hook_event_name?: string;
   request_id?: string;
   session_id?: string;
+  turn_id?: string;
   cwd?: string;
   message?: string;
+  /** Final assistant reply supplied by Codex Stop events. */
+  last_assistant_message?: string | null;
   /** UserPromptSubmit carries `prompt`; `message` belongs to Notification/Stop. */
   prompt?: string;
   tool_name?: string;
@@ -137,10 +141,11 @@ function clearSession() {
 }
 
 export function registerHookHandlers(island: Island) {
-  void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload));
+  const codex = new CodexSessions();
+  void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload, codex));
 }
 
-function handleHook(island: Island, payload: HookPayload) {
+function handleHook(island: Island, payload: HookPayload, codex: CodexSessions) {
   if (State.paused) {
     // Silence here used to cost Claude Code nearly two minutes: the relay waited
     // for a decision from an island that had already decided not to look. Say so,
@@ -159,7 +164,6 @@ function handleHook(island: Island, payload: HookPayload) {
   const validAgent = validateAgent(payload.coucou_agent);
   const agentId = validAgent ? `agent_${validAgent}` : CLAUDE_ID;
   const isExternalAgent = validAgent !== null;
-
   const focused = State.focusId === agentId;
 
   /** Alerts force the island open; work events only reveal the compact island. */
@@ -174,13 +178,49 @@ function handleHook(island: Island, payload: HookPayload) {
   };
 
   /** Ensure the agent pill exists (no-op for Claude Code). */
-  const ensurePill = () => {
-    if (isExternalAgent) {
-      State.upsertExternalAgent(agentId, validAgent!, agentColor(validAgent!));
-    } else {
-      upsert(projectName, cwd);
+const ensurePill = () => {
+  if (isExternalAgent) {
+    const displayName =
+      validAgent!.charAt(0).toUpperCase() + validAgent!.slice(1);
+
+    State.upsertExternalAgent(
+      agentId,
+      displayName,
+      agentColor(validAgent!),
+    );
+  } else {
+    upsert(projectName, cwd);
+  }
+};
+
+  if (validAgent === "codex" && name !== "PermissionRequest") {
+    const result = codex.apply(payload, stepLabel(payload.tool_name ?? "Tool", payload.tool_input ?? {}));
+    if (!result) return;
+    ensurePill();
+    const task = State.tasks.find((entry) => entry.id === agentId)!;
+    const current = result.current;
+    task.state = current?.state ?? "idle";
+    task.steps = [...(current?.steps ?? [])];
+    task.stepIndex = Math.max(0, task.steps.length - 1);
+    task.sessionCwd = current?.cwd ?? null;
+    task.pillBadge = !focused && (task.state === "finished" || task.state === "error")
+      ? task.state : null;
+    if (name === "UserPromptSubmit") State.setFocus(agentId);
+    if (result.alert) {
+      Sound.play(result.alert === "finished" ? "finish" : "error");
+      if (State.focusId === agentId) surface(result.alert, true);
+    } else if (State.focusId === agentId) {
+      // A new turn or a return to another active chat dismisses the old result.
+      // Preserve Settings, chat, and other views the user opened deliberately.
+      if (State.mode === "expanded" && (State.view === "finished" || State.view === "error") &&
+          task.state !== "finished" && task.state !== "error") {
+        island.setView("overview");
+      }
+      if (current) surface("overview", false);
     }
-  };
+    State.notify();
+    return;
+  }
 
   switch (name) {
     case "SessionStart":
@@ -190,14 +230,18 @@ function handleHook(island: Island, payload: HookPayload) {
       break;
 
     case "UserPromptSubmit": {
-      ensurePill();
-      State.updateTask(agentId, "thinking");
-      // The field is `prompt`; reading `message` meant this step was always blank.
-      const asked = payload.prompt ?? payload.message;
-      if (asked) State.appendStep(agentId, asked.slice(0, 60));
-      surface("overview", false);
-      break;
-    }
+  ensurePill();
+  State.setFocus(agentId);
+
+  State.updateTask(agentId, "thinking");
+
+  // The field is `prompt`; reading `message` meant this step was always blank.
+  const asked = payload.prompt ?? payload.message;
+  if (asked) State.appendStep(agentId, asked.slice(0, 60));
+
+  surface("overview", false);
+  break;
+}
 
     case "PreToolUse": {
       ensurePill();
@@ -230,21 +274,33 @@ function handleHook(island: Island, payload: HookPayload) {
       break;
     }
 
-    case "Stop":
-      State.updateTask(agentId, "finished");
-      if (payload.message) State.appendStep(agentId, payload.message.slice(0, 60));
-      Sound.play("finish");
-      if (focused) surface("finished", true);
-      else State.setPillBadge(agentId, "finished");
-      window.setTimeout(() => {
-        if (isExternalAgent) {
-          State.removeTask(agentId);
-        } else {
-          State.updateTask(agentId, "idle");
-          State.setPillBadge(agentId, null);
-        }
-      }, 5200);
-      break;
+    case "Stop": {
+  State.updateTask(agentId, "finished");
+
+  const completed = payload.last_assistant_message ?? payload.message;
+  if (completed) {
+    State.appendStep(agentId, completed.slice(0, 60));
+  }
+
+  Sound.play("finish");
+
+  if (focused) {
+    surface("finished", true);
+  } else {
+    State.setPillBadge(agentId, "finished");
+  }
+
+  window.setTimeout(() => {
+    if (isExternalAgent && agentId !== "agent_codex") {
+      State.removeTask(agentId);
+    } else if (!isExternalAgent) {
+      State.updateTask(agentId, "idle");
+      State.setPillBadge(agentId, null);
+    }
+  }, 5200);
+
+  break;
+}
 
     case "StopFailure":
       State.updateTask(agentId, "error");
@@ -254,13 +310,13 @@ function handleHook(island: Island, payload: HookPayload) {
       break;
 
     case "SessionEnd":
-      if (isExternalAgent) {
-        State.removeTask(agentId);
-      } else {
-        State.updateTask(agentId, "idle");
-        clearSession();
-      }
-      break;
+  if (isExternalAgent) {
+    State.removeTask(agentId);
+  } else {
+    State.updateTask(agentId, "idle");
+    clearSession();
+  }
+  break;
 
     case "SubagentStart":
       State.appendStep(agentId, "+ subagent");

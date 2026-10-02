@@ -196,11 +196,11 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
         .to_string();
 
     if event != "PermissionRequest" {
-        log::line(format!("hook {event}"));
-        let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
-        pipe.finish();
-        return;
-    }
+    log::line(format!("hook {event}"));
+    let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
+    pipe.finish();
+    return;
+}
 
     let id = format!("{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<Reply>(4);
