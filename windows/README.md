@@ -112,11 +112,22 @@ OpenAI**):
   choose. Requests set `store: false`; OpenAI's own data retention policy still
   applies.
 
-**Claude's Mochi** uses an Anthropic API key (**Settings… → Claude's Mochi ·
-Anthropic**). Anthropic does not let apps send chat through a Claude Pro or Max
-sign-in, so without a key the chat offers **Ask in Claude Code**: your question
-opens in the official Claude Code in Windows Terminal, which runs on your own
-Claude plan.
+**Claude's Mochi** also signs in one of two ways (**Settings… → Claude's Mochi ·
+Anthropic**):
+
+- **Claude plan (Claude Code sign-in)**, the default: Coucou runs the official,
+  unmodified Claude Code you are signed in to (`claude -p`) in its restricted
+  mode. It can only search the web, read web pages and read a file you dropped;
+  hooks, plugins and MCP servers are off, and the chat is not saved to your
+  Claude Code history. Replies count against your Claude plan's usage. Coucou
+  never sees your sign-in. **Test connection** checks `claude auth status`.
+- **Anthropic API key**: Coucou calls the Anthropic API with the key and model
+  you choose. Without a key, the chat offers **Ask in Claude Code**: your
+  question opens in the official Claude Code in Windows Terminal.
+
+On a plan, both Mochis use the model their CLI picks for your plan, and the
+Model setting applies only to API keys. Anthropic and OpenAI set the terms and
+limits for using a plan this way and may change them.
 
 Keys live in the **Windows Credential Manager**, never on disk and never in the
 interface — the island can only ask whether a key exists. Same for every

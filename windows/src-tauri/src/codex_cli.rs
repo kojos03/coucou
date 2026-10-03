@@ -89,13 +89,13 @@ do not run commands or look at files unless the user asks about a file they atta
     text
 }
 
-enum FileInput {
+pub(crate) enum FileInput {
     Image,
     Text(String),
     Reference,
 }
 
-fn file_input(path: &str) -> FileInput {
+pub(crate) fn file_input(path: &str) -> FileInput {
     let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp") {
         return FileInput::Image;
@@ -198,20 +198,29 @@ fn run(codex: &Path, dir: &Path, reply: &Path, prompt: &str, images: &[PathBuf])
 
 /// Reads stderr on its own thread so a chatty Codex can never fill the pipe.
 fn drain(child: &mut Child) -> std::sync::mpsc::Receiver<String> {
+    read_all(child.stderr.take())
+}
+
+pub(crate) fn read_all(stream: Option<impl Read + Send + 'static>) -> std::sync::mpsc::Receiver<String> {
     let (tx, rx) = std::sync::mpsc::channel();
-    let stderr = child.stderr.take();
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
-        if let Some(mut stderr) = stderr {
-            let _ = stderr.read_to_end(&mut bytes);
+        if let Some(mut stream) = stream {
+            let _ = stream.read_to_end(&mut bytes);
         }
         let _ = tx.send(String::from_utf8_lossy(&bytes).into_owned());
     });
     rx
 }
 
+/// `codex login status` says "Logged in using ChatGPT" (or an API key).
+fn signed_in(output: &str) -> bool {
+    let lower = output.to_lowercase();
+    lower.contains("logged in") && !lower.contains("not logged in")
+}
+
 /// `Some(success)` once the process ends, `None` after killing it on timeout.
-fn wait(child: &mut Child, timeout: Duration) -> Option<bool> {
+pub(crate) fn wait(child: &mut Child, timeout: Duration) -> Option<bool> {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -225,7 +234,8 @@ fn wait(child: &mut Child, timeout: Duration) -> Option<bool> {
     }
 }
 
-/// `codex` is an npm shim (cmd → node → codex.exe): end the whole tree.
+/// `codex` is an npm shim (cmd → node → codex.exe), and Claude Code may start
+/// helpers of its own: end the whole tree.
 fn kill_tree(child: &mut Child) {
     #[cfg(windows)]
     {
@@ -280,34 +290,34 @@ fn retry_time(log: &str) -> Option<String> {
 /// Checks that Codex is signed in, without sending a message.
 pub async fn test_connection() -> Result<(), ChatError> {
     let codex = codex()?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = Command::new(&codex);
-        cmd.args(["login", "status"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-        platform::no_console(&mut cmd);
-        let mut child = cmd.spawn().map_err(|_| ChatError::new(
-            "cli",
-            "Could not start the Codex CLI. Check that `codex` runs in a terminal.",
-            false,
-        ))?;
-        let mut stdout = child.stdout.take();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut text = String::new();
-            if let Some(out) = stdout.as_mut() {
-                let _ = out.read_to_string(&mut text);
-            }
-            let _ = tx.send(text);
-        });
-        let ok = wait(&mut child, LOGIN_TIMEOUT);
-        let text = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default().to_lowercase();
-        if ok == Some(true) && text.contains("logged in") && !text.contains("not logged in") {
-            Ok(())
-        } else {
-            Err(classify("not logged in"))
-        }
-    })
-    .await
-    .unwrap_or_else(|_| Err(ChatError::new("cli", "Codex stopped unexpectedly. Try again.", false)))
+    tauri::async_runtime::spawn_blocking(move || login_status(&codex))
+        .await
+        .unwrap_or_else(|_| Err(ChatError::new("cli", "Codex stopped unexpectedly. Try again.", false)))
+}
+
+fn login_status(codex: &Path) -> Result<(), ChatError> {
+    let mut cmd = Command::new(codex);
+    // Codex prints its login status on stderr, so read both streams.
+    cmd.args(["login", "status"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    platform::no_console(&mut cmd);
+    let mut child = cmd.spawn().map_err(|_| ChatError::new(
+        "cli",
+        "Could not start the Codex CLI. Check that `codex` runs in a terminal.",
+        false,
+    ))?;
+    let stdout = read_all(child.stdout.take());
+    let stderr = drain(&mut child);
+    let ok = wait(&mut child, LOGIN_TIMEOUT);
+    let text = format!(
+        "{}\n{}",
+        stdout.recv_timeout(Duration::from_secs(2)).unwrap_or_default(),
+        stderr.recv_timeout(Duration::from_secs(2)).unwrap_or_default(),
+    );
+    if ok == Some(true) && signed_in(&text) {
+        Ok(())
+    } else {
+        Err(classify("not logged in"))
+    }
 }
 
 #[cfg(test)]
@@ -357,6 +367,10 @@ mod tests {
         let unknown = classify("panic: secret-sentinel");
         assert_eq!(unknown.code, "cli");
         assert!(!unknown.message.contains("secret-sentinel"));
+        assert!(signed_in("\nLogged in using ChatGPT\r\n"));
+        assert!(signed_in("Logged in using an API key - sk-***"));
+        assert!(!signed_in("Not logged in"));
+        assert!(!signed_in(""));
         assert_eq!(retry_time("try again at <script>"), None);
         assert_eq!(retry_time("Try again at 21:31."), Some("21:31".into()));
     }
@@ -377,5 +391,27 @@ mod tests {
         let large = vec![b'a'; claude::MAX_INLINE_TEXT as usize + 1];
         assert!(matches!(file_input(&write("big.txt", &large)), FileInput::Reference));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "Runs the installed Codex CLI's `codex login status`; sends no message"]
+    fn native_codex_sign_in_is_detected() {
+        let codex = codex().expect("the Codex CLI must be on PATH for this explicit test");
+        login_status(&codex).expect("Codex should report a sign-in");
+    }
+
+    #[test]
+    #[ignore = "Sends one short question through `codex exec`; uses the signed-in ChatGPT plan"]
+    fn native_codex_exec_answers() {
+        let codex = codex().expect("the Codex CLI must be on PATH for this explicit test");
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("coucou-codex-exec-{unique}"));
+        std::fs::create_dir(&dir).unwrap();
+        let reply = dir.join("reply.txt");
+        let text = prompt(&[], "Reply with exactly the word: pong");
+        let answer = run(&codex, &dir, &reply, &text, &[]);
+        let _ = std::fs::remove_dir_all(&dir);
+        let answer = answer.map_err(|e| e.message).expect("Codex should answer");
+        assert!(answer.to_lowercase().contains("pong"), "{answer}");
     }
 }

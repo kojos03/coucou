@@ -104,7 +104,7 @@ fn api_key() -> Result<String, ChatError> {
         .map_err(|message| ChatError::new("credential_store", message, true))?
         .ok_or_else(|| ChatError::new(
             "missing_key",
-            "Claude's Mochi needs an Anthropic API key. Add one in Claude's Mochi settings. Your Claude Code or Codex sign-in does not set up this chat.",
+            "Claude's Mochi needs an Anthropic API key. Add one in Claude's Mochi settings, or switch it to your Claude plan there.",
             true,
         ))
 }

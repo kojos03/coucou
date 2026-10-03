@@ -34,7 +34,7 @@ fn api_key() -> Result<String, ChatError> {
         .map_err(|message| ChatError::new("credential_store", message, true))?
         .ok_or_else(|| ChatError::new(
             "missing_key",
-            "Codex's Mochi needs an OpenAI API key. Add one in Codex's Mochi settings. Your Codex or ChatGPT sign-in does not set up this chat.",
+            "Codex's Mochi needs an OpenAI API key. Add one in Codex's Mochi settings, or switch it to your ChatGPT plan there.",
             true,
         ))
 }

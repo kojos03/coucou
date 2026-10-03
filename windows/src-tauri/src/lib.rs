@@ -1,6 +1,7 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
 mod claude;
+mod claude_cli;
 mod codex_cli;
 mod codex_hooks;
 mod files;
@@ -224,10 +225,11 @@ enum ChatProvider {
 }
 
 /// One conversation per Mochi, so switching pills never mixes the two histories.
-/// Codex's Mochi keeps one per sign-in method, since their formats differ.
+/// Each Mochi keeps one per sign-in method, since their formats differ.
 #[derive(Default)]
 struct Chats {
     anthropic: Chat,
+    claude_code: Chat,
     openai: Chat,
     codex: Chat,
 }
@@ -241,11 +243,17 @@ async fn chat_send(
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, ChatError> {
-    let (model, openai_model, codex_sign_in) = {
+    let (model, openai_model, claude_sign_in, codex_sign_in) = {
         let settings = shared.settings.lock().unwrap();
-        (settings.model.clone(), settings.openai_model.clone(), settings.openai_auth != "apiKey")
+        (
+            settings.model.clone(),
+            settings.openai_model.clone(),
+            settings.anthropic_auth != "apiKey",
+            settings.openai_auth != "apiKey",
+        )
     };
     match provider {
+        ChatProvider::Anthropic if claude_sign_in => claude_cli::send(&chats.claude_code, query, context).await,
         ChatProvider::Anthropic => claude::send(&chats.anthropic, &model, query, context).await,
         ChatProvider::Openai if codex_sign_in => codex_cli::send(&chats.codex, query, context).await,
         ChatProvider::Openai => openai::send(&chats.openai, &openai_model, query, context).await,
@@ -256,19 +264,25 @@ async fn chat_send(
 #[tauri::command]
 fn chat_reset(chats: State<Chats>) {
     chats.anthropic.reset();
+    chats.claude_code.reset();
     chats.openai.reset();
     chats.codex.reset();
 }
 
-/// Checks the saved key and model, or that Codex is signed in. Sends no message.
+/// Checks the saved key and model, or that Claude Code or Codex is signed in.
+/// Sends no message.
 #[tauri::command]
 async fn chat_test_connection(
     shared: State<'_, Shared>,
     provider: ChatProvider,
     model: String,
 ) -> Result<(), ChatError> {
-    let codex_sign_in = shared.settings.lock().unwrap().openai_auth != "apiKey";
+    let (claude_sign_in, codex_sign_in) = {
+        let settings = shared.settings.lock().unwrap();
+        (settings.anthropic_auth != "apiKey", settings.openai_auth != "apiKey")
+    };
     match provider {
+        ChatProvider::Anthropic if claude_sign_in => claude_cli::test_connection().await,
         ChatProvider::Anthropic => claude::test_connection(&model).await,
         ChatProvider::Openai if codex_sign_in => codex_cli::test_connection().await,
         ChatProvider::Openai => openai::test_connection(&model).await,

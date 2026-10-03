@@ -1,7 +1,8 @@
 # Windows Codex integration: progress and next phases
 
-Last updated: 3 October 2026, evening: `windows-codex-claude` is now the main
-working version, rebuilt and running on the development machine (section 8).
+Last updated: 3 October 2026, late evening: Claude's Mochi now chats on the
+user's Claude plan through Claude Code, confirmed live in the island (section 9);
+the upstream review is in [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
 This is the engineering handoff for Konstantinos and Zack on the
 [kojos03/coucou fork](https://github.com/kojos03/coucou). The Windows work is
@@ -13,17 +14,17 @@ development.
 | `windows-codex` | [ee6176f — Fix Windows Codex activity and completion lifecycle](https://github.com/kojos03/coucou/commit/ee6176f7c42103de18d298d3a90969097204665f) | Pushed; integration baseline |
 | `windows-codex-documentation` | [2967bb8 — Document Windows Codex progress and next phases](https://github.com/kojos03/coucou/commit/2967bb80ad60e8e7dbeb6d64ebad011ecb4ec047), on top of `ee6176f` | Pushed |
 | `windows-phase1` | [3a8f2cd — Fix Windows launch actions and Mochi chat setup](https://github.com/kojos03/coucou/commit/3a8f2cdea98b3e1d9cc50349b6a94e9dd9ac6b50) and `c95d7ee` (review fix and this note), on top of `2967bb8` | Pushed; not merged into `windows-codex` or `main` |
-| `windows-codex-claude` | **Main working version.** Two Mochis and chats (section 7), subscriptions, Codex hook setup and named pills (section 8), on top of `windows-phase1` | Pushed; not merged |
+| `windows-codex-claude` | **Main working version.** Two Mochis and chats (section 7), subscriptions, Codex hook setup and named pills (section 8), Claude's Mochi on the Claude plan (section 9), on top of `windows-phase1` | Pushed; not merged |
 
 **Current status:** `windows-codex-claude` is the main working version. It
-passes every automated check natively on Windows, including the three opt-in
-native tests, and the release build runs on the development machine, where the
-island, pills, Claude hand-off and Settings were exercised by hand (section 8).
-Not yet confirmed: a successful live chat reply from either Mochi (the ChatGPT
-plan's Codex usage limit was reached during testing, and no Anthropic key is
-set) and Claude Code activity in the island (Claude Code still needs its
-sign-in and hooks). Phase 2 is implemented on this branch; Phases 3 and 4 are
-proposed work.
+passes every automated check natively on Windows, including the opt-in native
+tests, and the release build runs on the development machine. Claude's Mochi
+answered live in the island on the user's Claude Pro plan, with web search and a
+follow-up turn (section 9). Not yet confirmed: a live reply from Codex's Mochi
+(the ChatGPT plan's Codex usage limit runs until 4 October), file drops on
+either plan, and a prolonged Claude Code + Codex session. Phase 2 is implemented
+on this branch; Phases 3 and 4 are proposed work, and the upstream features to
+port are planned in [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
 ## What has been completed
 
@@ -266,10 +267,9 @@ output: usage limit (with Codex's retry time), not signed in, rate limit,
 network. **Test connection** runs `codex login status`. The OpenAI API key mode
 from section 7 remains available as the alternative.
 
-**Why not the Claude plan.** Anthropic's Claude Code terms do not permit
-third-party developers to route requests through Free, Pro, or Max plan
-credentials, so Claude's Mochi keeps the Anthropic API key. Without a key, the
-chat error offers **Ask in Claude Code**
+**Claude Code hand-off.** At this point Claude's Mochi kept the Anthropic API
+key (section 9 replaces that with the Claude plan). Without a key, the chat
+error offers **Ask in Claude Code**
 ([launch.rs](../windows/src-tauri/src/launch.rs)): the question is saved as
 `%LOCALAPPDATA%\Coucou\mochi\claude\question-<time>.md` and the official Claude
 Code opens in a Windows Terminal tab (PowerShell window as fallback) with
@@ -314,6 +314,81 @@ any Anthropic reply (no key), Claude Code sign-in and its hooks delivering to
 the island, writing hooks.json from the real Settings window (not needed here),
 and a prolonged Claude Code + Codex session.
 
+### 9. Claude's Mochi on the Claude plan (`windows-codex-claude`)
+
+**Why this changed.** Section 8 kept Claude's Mochi on an API key. On
+3 October Anthropic's legal and compliance page was re-read: it does not allow
+third-party developers to offer Claude.ai sign-in or to route requests through
+Free, Pro or Max credentials on users' behalf, but it does not prevent a user
+from signing in to the unmodified Claude Code binary with their own
+subscription. Coucou now does only that: it runs the user's own installed,
+signed-in `claude.exe` and never handles the sign-in, its tokens or its
+requests. Anthropic has also described a change, currently paused, that would
+bill non-interactive (`claude -p`) use from a separate credit pool; if it
+comes back, plan chats may count differently. The API key mode stays as the alternative.
+
+**How it runs** ([claude_cli.rs](../windows/src-tauri/src/claude_cli.rs)), in
+the empty folder `%LOCALAPPDATA%\Coucou\mochi\claude-chat`:
+
+```
+claude -p --output-format json --no-session-persistence --restricted --safe-mode
+  --settings {"disableAllHooks":true} --permission-mode dontAsk
+  --tools Read,WebSearch,WebFetch --allowedTools Read,WebSearch,WebFetch
+  --effort low --system-prompt <Mochi's prompt> [--add-dir <folder of a dropped file>]
+```
+
+- The message goes through stdin, and each turn carries the conversation so far.
+- Restricted mode removes every tool that runs commands and confines file reads
+  to the working folders; `dontAsk` refuses anything not pre-approved. Safe
+  mode and `disableAllHooks` keep hooks, plugins, MCP servers and CLAUDE.md
+  files out, so Mochi's own runs never appear as Claude Code activity.
+- `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDECODE` are removed from
+  the child's environment, so the plan is used rather than a key.
+- Text files up to 200 KB are inlined. Images, PDFs and larger files are read
+  by Claude Code itself; the file's folder (Coucou's inbox) is added with
+  `--add-dir` for the rest of the conversation.
+- The JSON result (`is_error`, `result`, `api_error_status`) maps to: not signed
+  in, usage limit (with Claude Code's reset time), outdated Claude Code, busy,
+  network, or a generic error. Nothing else from Claude Code's output reaches
+  the UI. A run is killed (whole process tree) after 4 minutes.
+- **Test connection** runs `claude auth status` and reads `loggedIn`.
+- The prompt asks for plain URLs, since Claude Code's web search otherwise
+  cites Markdown links, which the bubble shows as raw text.
+- Settings gains `anthropicAuth` (`claudeCode`, the default, or `apiKey`) and a
+  **Sign in with** choice in Claude's section. Both Mochis' sections now share
+  one plan sign-in description in [main.ts](../windows/src/settings/main.ts). On
+  a plan the Model row is hidden: Claude Code picks the model for the plan
+  (Sonnet 5.5 on this Pro account).
+- **Fix:** `codex login status` prints on stderr, so Codex's **Test
+  connection** reported "not signed in" for a signed-in Codex. It now reads
+  both streams.
+
+**Verified on Windows, 3 October, late evening** (natively, through Desktop
+Commander and by hand in the release build):
+
+| Check | Result |
+|---|---|
+| `npm test` | 32/32 (17 hook + 15 view tests) |
+| `npx tsc --noEmit` | Pass |
+| `cargo test -p coucou --lib --locked` | 36 passed, 7 ignored, no warnings |
+| Native opt-in tests | `claude auth status` detects the sign-in; `claude -p` through Coucou's own runner answered "pong"; `codex login status` detects the sign-in |
+| `npx tauri build --no-bundle` | Built twice (2 min 12 s), no warnings; restarted through Explorer |
+| Claude's Mochi, live in the island | Claude Code pill focused: answered on the Pro plan with a web search (latest Rust and Node.js LTS releases, citing a plain URL after the prompt change); a follow-up turn recalled the first question |
+| Hooks stay off | Coucou's Claude Code hooks are installed in `~/.claude/settings.json`, yet the log shows no hook event during Mochi's runs, and no transcript folder was created under `~/.claude/projects` |
+| Codex's Mochi, live in the island | Codex pill focused: Codex's real usage-limit error shown as "Codex says you can try again at Oct 4th", with **Retry** |
+| Error shapes | Signed out (an empty `CLAUDE_CONFIG_DIR`): `is_error` with "Not logged in · Please run /login", and `auth status` `loggedIn: false`; an unknown flag: "error: unknown option". Both are covered by tests |
+
+**Not verified:** a Claude plan usage-limit reply (matched from known
+wordings: "hit your limit", "limit reached", "usage limit", "resets …"); an image
+or PDF dropped on either Mochi; a Codex's Mochi reply (limit until 4 October);
+Claude Code signed in with a Console account instead of a plan; the new **Sign in with** choice clicked by hand in the
+Settings window (covered by the view test only).
+
+**Upstream.** [Louis-CFM/coucou](https://github.com/Louis-CFM/coucou) was
+reviewed the same evening. Its 17 new commits are macOS-only and merge without
+conflicts; the features worth porting and their order are in
+[UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
+
 ## Where the implementation lives
 
 | File | Responsibility |
@@ -325,6 +400,7 @@ and a prolonged Claude Code + Codex session.
 | [island.ts](../windows/src/island/island.ts) | Terminal, VS Code, and ↗ routing; launch error note |
 | [launch.rs](../windows/src-tauri/src/launch.rs) and [lib.rs](../windows/src-tauri/src/lib.rs) | Folder validation, Windows Terminal/PowerShell, VS Code and Claude Code hand-off launchers, Tauri commands |
 | [codex_cli.rs](../windows/src-tauri/src/codex_cli.rs) | Codex's Mochi on the ChatGPT plan through `codex exec` |
+| [claude_cli.rs](../windows/src-tauri/src/claude_cli.rs) | Claude's Mochi on the Claude plan through `claude -p` |
 | [codex_hooks.rs](../windows/src-tauri/src/codex_hooks.rs) | Codex hook status, install, repair, and removal |
 | [claude.rs](../windows/src-tauri/src/claude.rs) | Claude's Mochi (Anthropic), shared conversation store and structured errors, connection test |
 | [openai.rs](../windows/src-tauri/src/openai.rs) | Codex's Mochi (OpenAI Responses API), error mapping, connection test |
@@ -333,7 +409,7 @@ and a prolonged Claude Code + Codex session.
 | [settings](../windows/src/settings/main.ts) and [hook installer](../windows/src-tauri/src/hooks.rs) | Settings window (hooks for both agents, both Mochis' sign-in and connection test) and Claude Code hook installation |
 | [pipe.rs](../windows/src-tauri/src/pipe.rs) and [relay](../windows/hook/src/main.rs) | Native transport and hook forwarding |
 | [hooks.test.mjs](../windows/tests/hooks.test.mjs) | 17 lifecycle, routing and pill tests |
-| [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 14 view tests: Phase 1, both Mochis, the Claude hand-off, and the Codex hooks section |
+| [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 15 view tests: Phase 1, both Mochis and their sign-in choices, the Claude hand-off, and the Codex hooks section |
 
 ## What was verified
 
@@ -413,15 +489,18 @@ Items 4 and 5 also cover the Codex lifecycle work.
 
 ## Recommended next change
 
-1. **Finish the live checks on the main working version.** Sign in to Claude
-   Code, install its hooks from Settings, and confirm a Claude Code session
-   lights up the Claude Code pill next to a Codex session. After the Codex usage
-   limit resets, ask Codex's Mochi a question, one needing web search, and one
-   about a dropped image.
-2. **Decide review items 1–3 and merge.** Merge `windows-codex-claude` (which
+1. **Finish the live checks on the main working version.** After the Codex
+   usage limit resets (4 October), ask Codex's Mochi a question, one needing
+   web search, and one about a dropped image. Drop an image and a PDF on
+   Claude's Mochi. Switch **Sign in with** by hand in Settings. Claude Code is
+   now signed in and its hooks are installed: confirm a Claude Code session
+   lights up the Claude Code pill next to a Codex session.
+2. **Merge upstream `main`** (no conflicts, macOS-only changes) so the fork
+   follows upstream's rules and docs, then port features in the order of
+   [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md), starting with
+   Codex approvals (Phase 3), whose protocol upstream has now settled.
+3. **Decide review items 1–3 and merge** `windows-codex-claude` (which
    contains `windows-phase1`) into `windows-codex` once the checks above pass.
-3. **Then Phase 3:** investigate Codex's `PermissionRequest` protocol before
-   building Allow/Deny cards.
 
 ## Next phases
 
@@ -453,9 +532,12 @@ Coucou without a decision so the originating agent can handle them. Codex
 therefore gets no Allow/Deny card. The tested Codex hook configuration does not
 register this event.
 
-First investigate the supported Codex approval protocol: event availability,
-response schema, identifiers, and timeout behavior. The existing Claude response
-format must not be assumed compatible.
+Upstream has since shipped Codex approvals on macOS (#130): `PermissionRequest`
+registered with a 120 s timeout and a `statusMessage`, answered with
+`decision.behavior` `allow` or `deny`, and no "Always" (Codex rejects
+`updatedPermissions`). Confirm that protocol against the installed Codex before
+porting it; the mapping is in
+[UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
 Then implement explicit Allow/Deny, request/session correlation, stale-request
 protection, and timeout/closed-app fallback, using reliable delivery from Phase 2.

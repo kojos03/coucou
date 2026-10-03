@@ -104,6 +104,8 @@ export interface Settings {
   openaiModel: string;
   /** Codex's Mochi signs in through the Codex CLI (ChatGPT plan) or an API key. */
   openaiAuth: "codex" | "apiKey";
+  /** Claude's Mochi signs in through Claude Code (Claude plan) or an API key. */
+  anthropicAuth: "claudeCode" | "apiKey";
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -120,6 +122,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "claude-opus-5",
   openaiModel: "gpt-6.1-sol",
   openaiAuth: "codex",
+  anthropicAuth: "claudeCode",
 };
 
 type Listener = () => void;

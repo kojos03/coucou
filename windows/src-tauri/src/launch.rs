@@ -55,11 +55,10 @@ pub fn terminal(path: Option<&str>) -> Result<(), String> {
     }
 }
 
-/// Opens the official Claude Code in a terminal with the user's question, so it
-/// runs on their own Claude sign-in: Anthropic does not let apps route chat
-/// through a Claude subscription themselves. The question travels in a file in
-/// Coucou's folder, mentioned as `@file`, so nothing the user typed reaches a
-/// command line.
+/// Opens the official Claude Code in a terminal with the user's question, for a
+/// full Claude Code session on their own Claude sign-in. The question travels
+/// in a file in Coucou's folder, mentioned as `@file`, so nothing the user typed
+/// reaches a command line.
 pub fn claude_code(question: &str) -> Result<(), String> {
     let question = question.trim();
     if question.is_empty() {
@@ -97,7 +96,7 @@ fn handoff_file(dir: &Path, question: &str) -> Result<String, String> {
     Ok(name)
 }
 
-fn find_claude() -> Option<PathBuf> {
+pub(crate) fn find_claude() -> Option<PathBuf> {
     platform::find_on_path("claude").or_else(|| {
         // Where the native installer puts it, until a restart picks up the new PATH.
         let exe = if cfg!(windows) { "claude.exe" } else { "claude" };

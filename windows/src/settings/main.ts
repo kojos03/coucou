@@ -324,8 +324,21 @@ interface ChatSectionConfig {
   models: [string, string][];
   setting: "model" | "openaiModel";
   console: [string, string];
-  /** Offers the Codex CLI's own sign-in (a ChatGPT plan) instead of a key. */
-  codexSignIn?: boolean;
+  plan: PlanSignIn;
+}
+
+/** The agent's own sign-in (a subscription plan), offered instead of a key. */
+interface PlanSignIn {
+  /** The Settings field holding the choice, and its value when the plan is used. */
+  setting: "anthropicAuth" | "openaiAuth";
+  value: "claudeCode" | "codex";
+  aria: string;
+  /** Labels of the plan and API-key options. */
+  options: [string, string];
+  state: string;
+  tested: string;
+  testHint: string;
+  usage: [string, string];
 }
 
 const CLAUDE_CHAT: ChatSectionConfig = {
@@ -335,7 +348,7 @@ const CLAUDE_CHAT: ChatSectionConfig = {
   vendor: "Anthropic",
   keyName: "anthropic-api-key",
   title: "Claude's Mochi · Anthropic",
-  about: "Answers when you chat while the Claude Code pill, or any pill other than Codex, is focused. It uses a separate Anthropic API key: signing into Claude Code or Codex does not configure it. Without a key, Mochi can pass your question to Claude Code, which runs on your Claude plan. Keys are stored in the operating system's credential store.",
+  about: "Answers when you chat while the Claude Code pill, or any pill other than Codex, is focused. With your Claude plan it runs the Claude Code you're signed in to: restricted to web search and files you drop, without hooks, and without adding the chat to your Claude Code history. Coucou never sees your sign-in. With an API key it calls the Anthropic API instead; keys are stored in the operating system's credential store.",
   missing: "Add an Anthropic API key to chat with Claude's Mochi.",
   placeholder: "sk-ant-...",
   models: [
@@ -345,6 +358,16 @@ const CLAUDE_CHAT: ChatSectionConfig = {
   ],
   setting: "model",
   console: ["Anthropic Console", "https://console.anthropic.com/"],
+  plan: {
+    setting: "anthropicAuth",
+    value: "claudeCode",
+    aria: "How Claude's Mochi signs in",
+    options: ["Claude plan (Claude Code sign-in)", "Anthropic API key"],
+    state: "Uses the Claude Code you're signed in to. Replies count against your Claude plan's usage.",
+    tested: "Claude Code is signed in. No chat message was sent; your plan's usage limits are not checked.",
+    testHint: "Test connection checks that Claude Code is signed in without sending a chat message.",
+    usage: ["Claude usage", "https://claude.ai/settings/usage"],
+  },
 };
 
 const CODEX_CHAT: ChatSectionConfig = {
@@ -364,10 +387,23 @@ const CODEX_CHAT: ChatSectionConfig = {
   ],
   setting: "openaiModel",
   console: ["OpenAI dashboard", "https://platform.openai.com/api-keys"],
-  codexSignIn: true,
+  plan: {
+    setting: "openaiAuth",
+    value: "codex",
+    aria: "How Codex's Mochi signs in",
+    options: ["ChatGPT plan (Codex sign-in)", "OpenAI API key"],
+    state: "Uses the Codex CLI you're signed in to. Replies count against your ChatGPT plan's Codex usage.",
+    tested: "Codex is signed in. No chat message was sent; your plan's usage limits are not checked.",
+    testHint: "Test connection checks that Codex is signed in without sending a chat message.",
+    usage: ["ChatGPT usage", "https://chatgpt.com/codex/settings/usage"],
+  },
 };
 
-const CODEX_USAGE_URL = "https://chatgpt.com/codex/settings/usage";
+/** Records which sign-in a Mochi uses. */
+function setAuth(plan: PlanSignIn, usePlan: boolean) {
+  if (plan.setting === "anthropicAuth") settings.anthropicAuth = usePlan ? "claudeCode" : "apiKey";
+  else settings.openaiAuth = usePlan ? "codex" : "apiKey";
+}
 
 function chatSection(cfg: ChatSectionConfig): { el: HTMLElement; reveal(): void } {
   const dot = statusDot(false);
@@ -381,20 +417,20 @@ function chatSection(cfg: ChatSectionConfig): { el: HTMLElement; reveal(): void 
   const testBtn = h("button", { text: "Test connection", disabled: true });
   const feedback = h("div", { role: "status", "aria-live": "polite" });
   const model = h("select", { "aria-label": `${cfg.vendor} chat model` });
-  const signIn = h("select", { "aria-label": "How Codex's Mochi signs in" });
-  for (const [id, label] of [["codex", "ChatGPT plan (Codex sign-in)"], ["apiKey", "OpenAI API key"]]) {
+  const signIn = h("select", { "aria-label": cfg.plan.aria });
+  for (const [id, label] of [[cfg.plan.value, cfg.plan.options[0]], ["apiKey", cfg.plan.options[1]]]) {
     signIn.append(h("option", { value: id, text: label }));
   }
   const consoleBtn = h("button", { text: cfg.console[0] });
   let busy = false;
   let present = false;
-  /** True when Codex's Mochi runs on the Codex CLI's sign-in rather than a key. */
-  const usesCodex = () => cfg.codexSignIn === true && settings.openaiAuth !== "apiKey";
+  /** True when this Mochi runs on the agent's own sign-in rather than a key. */
+  const usesPlan = () => settings[cfg.plan.setting] !== "apiKey";
 
   function setBusy(value: boolean) {
     busy = value;
     saveBtn.disabled = clearBtn.disabled = field.disabled = model.disabled = signIn.disabled = value;
-    testBtn.disabled = value || (!usesCodex() && !present);
+    testBtn.disabled = value || (!usesPlan() && !present);
   }
 
   function notice(text: string, ok = false) {
@@ -417,7 +453,7 @@ function chatSection(cfg: ChatSectionConfig): { el: HTMLElement; reveal(): void 
       dot.style.background = "#f5a524";
       state.textContent = "Could not check the credential store.";
       // A key the chosen sign-in does not use is not worth an error.
-      if (!usesCodex()) notice(chatFailure(error).message);
+      if (!usesPlan()) notice(chatFailure(error).message);
       applyMode();
       return false;
     }
@@ -457,19 +493,19 @@ function chatSection(cfg: ChatSectionConfig): { el: HTMLElement; reveal(): void 
 
   testBtn.addEventListener("click", async () => {
     if (busy) return;
-    const codex = usesCodex();
-    if (!codex && field.value.trim()) { notice("Save the new key before testing it."); return; }
+    const plan = usesPlan();
+    if (!plan && field.value.trim()) { notice("Save the new key before testing it."); return; }
     setBusy(true);
     testBtn.textContent = "Testing…";
     clear(feedback);
     try {
       await Bridge.chatTestConnection(cfg.provider, model.value);
-      if (codex) dot.style.background = "#22c55e";
-      notice(codex
-        ? "Codex is signed in. No chat message was sent; your plan's usage limits are not checked."
+      if (plan) dot.style.background = "#22c55e";
+      notice(plan
+        ? cfg.plan.tested
         : "Connected. The saved key can access this model. No chat message was sent; billing and message generation are not tested.", true);
     } catch (error) {
-      if (codex) dot.style.background = "#f4505e";
+      if (plan) dot.style.background = "#f4505e";
       notice(chatFailure(error).message);
     } finally {
       testBtn.textContent = "Test connection";
@@ -491,30 +527,30 @@ function chatSection(cfg: ChatSectionConfig): { el: HTMLElement; reveal(): void 
   const keyRow = h("div", { class: "row" }, h("label", { text: "API key" }), field, saveBtn, clearBtn);
   const modelRow = h("div", { class: "row" }, h("label", { text: "Model" }), model);
   const testHint = h("div", { class: "hint" });
-  consoleBtn.addEventListener("click", () => void Bridge.openUrl(usesCodex() ? CODEX_USAGE_URL : cfg.console[1]));
+  consoleBtn.addEventListener("click", () => void Bridge.openUrl(usesPlan() ? cfg.plan.usage[1] : cfg.console[1]));
 
   /** Shows what the chosen sign-in needs: a key and a model, or neither. */
   function applyMode() {
-    const codex = usesCodex();
+    const plan = usesPlan();
     // `.row` sets display:flex, which beats the hidden attribute on its own.
     for (const row of [keyRow, modelRow]) {
-      row.hidden = codex;
-      row.style.display = codex ? "none" : "";
+      row.hidden = plan;
+      row.style.display = plan ? "none" : "";
     }
-    consoleBtn.textContent = codex ? "ChatGPT usage" : cfg.console[0];
-    testBtn.disabled = busy || (!codex && !present);
-    testHint.textContent = codex
-      ? "Test connection checks that Codex is signed in without sending a chat message."
+    consoleBtn.textContent = plan ? cfg.plan.usage[0] : cfg.console[0];
+    testBtn.disabled = busy || (!plan && !present);
+    testHint.textContent = plan
+      ? cfg.plan.testHint
       : "Test connection checks the saved key and selected model without sending a chat message.";
-    if (codex) {
+    if (plan) {
       dot.style.background = "#8e939c";
-      state.textContent = "Uses the Codex CLI you're signed in to. Replies count against your ChatGPT plan's Codex usage.";
+      state.textContent = cfg.plan.state;
     }
   }
 
-  signIn.value = settings.openaiAuth;
+  signIn.value = settings[cfg.plan.setting];
   signIn.addEventListener("change", () => {
-    settings.openaiAuth = signIn.value === "apiKey" ? "apiKey" : "codex";
+    setAuth(cfg.plan, signIn.value !== "apiKey");
     clear(feedback);
     void save();
     void refresh();
@@ -524,7 +560,7 @@ function chatSection(cfg: ChatSectionConfig): { el: HTMLElement; reveal(): void 
     "section", { id: cfg.id },
     h("h2", {}, dot, h("span", { text: cfg.title })),
     h("div", { class: "hint", text: cfg.about }),
-    cfg.codexSignIn ? h("div", { class: "row" }, h("label", { text: "Sign in with" }), signIn) : null,
+    h("div", { class: "row" }, h("label", { text: "Sign in with" }), signIn),
     state,
     keyRow,
     modelRow,

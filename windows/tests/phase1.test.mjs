@@ -151,8 +151,11 @@ test('duplicate sends are blocked while a chat request is pending', async () => 
   assert.equal(input.disabled, false);
 });
 
+// Claude's Mochi signs in through Claude Code by default; these tests cover its API-key mode.
+const apiKeyMode = { boot: async () => ({ settings: { anthropicAuth: 'apiKey' }, version: 'test' }) };
+
 test('credential read failures are visible and do not claim the key is missing', async () => {
-  const f = await fixture({ secretPresent: async key => {
+  const f = await fixture({ ...apiKeyMode, secretPresent: async key => {
     if (key === 'anthropic-api-key') throw 'Could not read the credential store.';
     return false;
   } }, true);
@@ -166,6 +169,7 @@ test('credential read failures are visible and do not claim the key is missing',
 test('save and remove update presence without rendering the key', async () => {
   let stored = false, saved = '';
   const f = await fixture({
+    ...apiKeyMode,
     secretPresent: async key => key === 'anthropic-api-key' && stored,
     secretSet: async (_, value) => { saved = value; stored = true; },
     secretClear: async () => { stored = false; },
@@ -183,7 +187,7 @@ test('save and remove update presence without rendering the key', async () => {
 });
 
 test('failed credential writes are reported and clear the password field', async () => {
-  const f = await fixture({ secretSet: async () => { throw 'Credential store unavailable.'; } }, true);
+  const f = await fixture({ ...apiKeyMode, secretSet: async () => { throw 'Credential store unavailable.'; } }, true);
   const field = f.api().all().find(el => el.tag === 'input');
   field.value = 'non-secret-test-value';
   await f.button('Save key').fire('click');
@@ -195,10 +199,11 @@ test('failed credential writes are reported and clear the password field', async
 test('connection test uses the selected model and requires unsaved keys to be saved first', async () => {
   const models = [];
   const f = await fixture({
+    ...apiKeyMode,
     secretPresent: async key => key === 'anthropic-api-key',
     chatTestConnection: async (provider, model) => { models.push([provider, model]); },
   }, true);
-  f.api().all().find(el => el.tag === 'select').value = 'claude-sonnet-5';
+  f.api().all().find(el => el.tag === 'select' && el.attrs['aria-label'] === 'Anthropic chat model').value = 'claude-sonnet-5';
   const field = f.api().all().find(el => el.tag === 'input');
   field.value = 'new-unsaved-value';
   await f.button('Test connection').fire('click');
@@ -316,6 +321,39 @@ test("Codex's Mochi signs in through Codex by default and can switch to an API k
   f.events.get('settings-section')('openai');
   assert.equal(section.scrolled, true);
   assert.notEqual(f.api().scrolled, true);
+});
+
+test("Claude's Mochi signs in through Claude Code by default and can switch to an API key", async () => {
+  const saved = [], tested = [], opened = [];
+  const f = await fixture({
+    saveSettings: async settings => { saved.push({ ...settings }); },
+    chatTestConnection: async (provider, model) => { tested.push([provider, model]); },
+    openUrl: async url => { opened.push(url); },
+  }, true);
+  const section = f.api();
+  const signIn = section.all().find(el => el.tag === 'select' && el.attrs['aria-label'] === "How Claude's Mochi signs in");
+  assert.match(section.textContent, /Claude's Mochi · Anthropic/);
+  assert.equal(signIn.value, 'claudeCode');
+  assert.match(section.textContent, /Claude Code you're signed in to/);
+  assert.doesNotMatch(section.textContent, /Add an Anthropic API key/);
+  const keyRow = section.all().find(el => el.className === 'row' && el.textContent.startsWith('API key'));
+  assert.equal(keyRow.style.display, 'none');
+  assert.equal(f.button('Test connection', section).disabled, false);
+  await f.button('Test connection', section).fire('click');
+  assert.deepEqual(tested, [['anthropic', 'claude-opus-5']]);
+  assert.match(section.textContent, /Claude Code is signed in/);
+  await f.button('Claude usage', section).fire('click');
+  assert.deepEqual(opened, ['https://claude.ai/settings/usage']);
+
+  signIn.value = 'apiKey';
+  await signIn.fire('change');
+  assert.equal(saved.at(-1).anthropicAuth, 'apiKey');
+  assert.equal(saved.at(-1).openaiAuth, 'codex');
+  assert.equal(keyRow.style.display, '');
+  assert.match(section.textContent, /Add an Anthropic API key/);
+  assert.equal(f.button('Test connection', section).disabled, true);
+  await f.button('Anthropic Console', section).fire('click');
+  assert.equal(opened.at(-1), 'https://console.anthropic.com/');
 });
 
 test('without a key, Claude\'s Mochi hands the question to Claude Code', async () => {

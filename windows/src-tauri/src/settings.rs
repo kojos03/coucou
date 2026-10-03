@@ -27,6 +27,10 @@ pub struct Settings {
     /// ChatGPT plan) or "apiKey" (an OpenAI API key in the credential store).
     #[serde(default = "default_openai_auth")]
     pub openai_auth: String,
+    /// How Claude's Mochi signs in: "claudeCode" (Claude Code's own sign-in, so
+    /// a Claude plan) or "apiKey" (an Anthropic API key in the credential store).
+    #[serde(default = "default_anthropic_auth")]
+    pub anthropic_auth: String,
 }
 
 fn default_model() -> String {
@@ -39,6 +43,10 @@ fn default_openai_model() -> String {
 
 fn default_openai_auth() -> String {
     "codex".to_string()
+}
+
+fn default_anthropic_auth() -> String {
+    "claudeCode".to_string()
 }
 
 impl Default for Settings {
@@ -60,6 +68,7 @@ impl Default for Settings {
             model: default_model(),
             openai_model: default_openai_model(),
             openai_auth: default_openai_auth(),
+            anthropic_auth: default_anthropic_auth(),
         }
     }
 }
