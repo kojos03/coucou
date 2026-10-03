@@ -8,6 +8,7 @@ import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { State, type AgentTask } from "../core/state";
 import { Bridge } from "../core/bridge";
+import { refreshCodexHooks } from "../island/integrations";
 
 /** Same shape as the Swift `timeAgo` computed properties. */
 export function timeAgo(value: unknown): string {
@@ -53,18 +54,40 @@ const OPEN_URLS: Record<string, string> = {
   integration_calcom: "https://app.cal.com/bookings",
 };
 
+/** The Codex card's status, from ~/.codex/hooks.json: worded like Claude Code's. */
+function codexStatus(configured: boolean, data: Record<string, unknown>): [string, string] {
+  if (configured) return ["Connected", "#22C55E"];
+  // Sessions still show up, but approvals need the entries that are missing.
+  if (data.anyInstalled === true) return ["Connected · repair hooks", "#F5A524"];
+  return ["Hooks not installed", "#F4505E"];
+}
+
 function idleCard(task: AgentTask, openSettings: () => void, openVSCode: () => void): HTMLElement {
   const info = State.integrations[task.id];
   const configured = info?.configured ?? false;
   const error = info?.error ?? null;
-  // The Claude Code pill is about hooks, not a key — the macOS wording would be
-  // misleading here.
+  const codex = task.id === "agent_codex";
+  // The Claude Code and Codex pills are about hooks, not a key — the macOS
+  // wording would be misleading here.
   const missing = task.id === "integration_claude" ? "Hooks not installed" : "Key not configured";
-  const label = error ?? (configured ? "Connected · loading…" : missing);
-  const statusColor = error || !configured ? "#F4505E" : "#22C55E";
+  const [codexLabel, codexColor] = codexStatus(configured, (info?.data ?? {}) as Record<string, unknown>);
+  const label = error ?? (codex ? codexLabel : configured ? "Connected · loading…" : missing);
+  const statusColor = error ? "#F4505E" : codex ? codexColor : configured ? "#22C55E" : "#F4505E";
 
   const actions = h("div", { class: "int-actions" });
-  if (task.id === "integration_claude") {
+  if (codex) {
+    // Like "Open Codex" on macOS: shown when the Codex app is installed.
+    if (info?.data?.app === true) {
+      actions.append(
+        h("button", {
+          class: "link-btn",
+          style: `color:${task.color}d9`,
+          text: "Open Codex",
+          onclick: () => void Bridge.openCodex().catch(() => {}),
+        }),
+      );
+    }
+  } else if (task.id === "integration_claude") {
     actions.append(
       h("button", {
         class: "link-btn",
@@ -98,19 +121,24 @@ function idleCard(task: AgentTask, openSettings: () => void, openVSCode: () => v
         class: "link-btn",
         style: `color:${task.color}d9`,
         text: "Refresh",
-        onclick: () => void Bridge.refreshIntegration(task.id),
+        onclick: () => void (codex ? refreshCodexHooks() : Bridge.refreshIntegration(task.id)),
       }),
     );
   } else {
     actions.append(
-      h("button", { class: "link-btn", style: "color:#8e939c", text: "Settings…", onclick: openSettings }),
+      h("button", {
+        class: "link-btn",
+        style: "color:#8e939c",
+        text: "Settings…",
+        onclick: codex ? () => void Bridge.openSettingsWindow("codex") : openSettings,
+      }),
     );
   }
 
   return h(
     "div",
     { class: "int-card" },
-    header(task.color, task.id === "integration_claude" ? "Claude Code" : task.name, "Integration"),
+    header(task.color, task.id === "integration_claude" ? "Claude Code" : codex ? "Codex" : task.name, "Integration"),
     h("div", { class: "int-status" }, dot(statusColor, 5), h("span", { text: label })),
     actions,
   );

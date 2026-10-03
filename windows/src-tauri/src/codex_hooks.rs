@@ -12,18 +12,26 @@ use serde_json::{json, Map, Value};
 use crate::hooks::{self, HookPreview};
 use crate::{platform, settings};
 
-/// The events the island follows. `PermissionRequest` is deliberately absent:
-/// Coucou does not answer Codex approvals yet.
+/// The events the island follows. `PermissionRequest` is answered from the
+/// island's Allow / Deny card; `Interrupt` tells it the user stopped a turn.
 pub const EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",
+    "PermissionRequest",
     "PostToolUse",
     "SubagentStart",
     "SubagentStop",
     "Stop",
+    "Interrupt",
     "SessionEnd",
 ];
+
+/// Codex waits this long for an answer from the island before asking itself.
+/// The relay gives up at 110 s, so Codex never hits its own timeout.
+const APPROVAL_TIMEOUT: u64 = 120;
+/// Shown in Codex while the island's card is waiting for a click.
+const APPROVAL_STATUS: &str = "Waiting for your answer in Coucou";
 
 /// Identifies a Coucou handler inside hooks.json.
 const MARKER: &str = "coucou-hook";
@@ -66,7 +74,8 @@ pub fn hooks_path() -> PathBuf {
 /// The handler Coucou registers for `event`. Same shape as the hand-repaired
 /// configuration that delivered Stop events: PowerShell needs the `&` call
 /// operator before a quoted path, and SessionEnd runs synchronously so it is
-/// delivered before Codex exits.
+/// delivered before Codex exits. PermissionRequest runs synchronously too, with
+/// a long timeout: Codex reads the island's decision from its output.
 fn handler(event: &str) -> Value {
     let exe = settings::hook_exe_path().to_string_lossy().to_string();
     let mut h = Map::new();
@@ -78,9 +87,18 @@ fn handler(event: &str) -> Value {
     }
     #[cfg(unix)]
     h.insert("command".into(), json!(format!("{} --agent codex {event}", hooks::sh_quote(&exe))));
-    h.insert("timeout".into(), json!(3));
-    if event != "SessionEnd" {
-        h.insert("async".into(), json!(true));
+    match event {
+        "PermissionRequest" => {
+            h.insert("timeout".into(), json!(APPROVAL_TIMEOUT));
+            h.insert("statusMessage".into(), json!(APPROVAL_STATUS));
+        }
+        "SessionEnd" => {
+            h.insert("timeout".into(), json!(3));
+        }
+        _ => {
+            h.insert("timeout".into(), json!(3));
+            h.insert("async".into(), json!(true));
+        }
     }
     Value::Object(h)
 }
@@ -317,6 +335,14 @@ mod tests {
         let session_end = &installed["hooks"]["SessionEnd"][0]["hooks"][0];
         assert!(session_end.get("async").is_none());
         assert_eq!(installed["hooks"]["Stop"][0]["hooks"][0]["async"], true);
+        assert_eq!(installed["hooks"]["Interrupt"][0]["hooks"][0]["async"], true);
+        // Codex reads the decision from a PermissionRequest handler's output, so
+        // it must run synchronously and outlast the relay's 110 s wait.
+        let approval = &installed["hooks"]["PermissionRequest"][0]["hooks"][0];
+        assert!(approval.get("async").is_none());
+        assert!(approval["timeout"].as_u64().unwrap() > 110);
+        assert_eq!(approval["statusMessage"], APPROVAL_STATUS);
+        assert!(approval["command"].as_str().unwrap().ends_with("--agent codex PermissionRequest"));
         #[cfg(windows)]
         assert!(installed["hooks"]["Stop"][0]["hooks"][0]["commandWindows"].as_str().unwrap().starts_with("& \""));
     }
@@ -342,6 +368,27 @@ mod tests {
         assert_eq!(next["hooks"]["Stop"][0]["hooks"], json!([foreign()]));
         assert_eq!(next["hooks"]["Stop"][1]["hooks"], json!([handler("Stop")]));
         assert!(EVENTS.iter().all(|e| state_of(next["hooks"].as_object().unwrap(), e) == "ok"));
+    }
+
+    #[test]
+    fn the_earlier_eight_event_installation_needs_only_the_two_new_events() {
+        // What Coucou wrote before approvals: everything but PermissionRequest
+        // and Interrupt. Repair adds those two and leaves the rest byte-identical,
+        // so Codex only asks the user to review the new entries.
+        let mut earlier = merged(&json!({}));
+        let hooks = earlier["hooks"].as_object_mut().unwrap();
+        hooks.remove("PermissionRequest");
+        hooks.remove("Interrupt");
+        let status: Vec<_> = EVENTS.iter().map(|e| (*e, state_of(hooks, e))).collect();
+        assert_eq!(
+            status.iter().filter(|(_, s)| *s == "missing").map(|(e, _)| *e).collect::<Vec<_>>(),
+            vec!["PermissionRequest", "Interrupt"],
+        );
+        let repaired = merged(&earlier);
+        for event in EVENTS.iter().filter(|e| !matches!(**e, "PermissionRequest" | "Interrupt")) {
+            assert_eq!(repaired["hooks"][*event], earlier["hooks"][*event], "{event}");
+        }
+        assert!(EVENTS.iter().all(|e| state_of(repaired["hooks"].as_object().unwrap(), e) == "ok"));
     }
 
     #[test]

@@ -464,7 +464,9 @@ body {
   align-items: center;
   gap: 6px;
   transform-origin: left center;
-  will-change: transform, opacity;
+  /* No will-change: as separate compositor layers inside the masked ticker,
+     WebView2 kept drawing the current row where a transition had left it, on
+     top of the completed row, after the DOM had settled. */
 }
 
 .ticker-row .tick-icon {

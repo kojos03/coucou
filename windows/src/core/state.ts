@@ -11,6 +11,32 @@ export function chatProviderFor(focusId: string | null): ChatProvider {
   return focusId === "agent_codex" ? "openai" : "anthropic";
 }
 
+/**
+ * The pills where you code: Claude Code and Codex. Each shows its session's
+ * project in the ticker, its own name on the pill, and an integration card
+ * when no session is running.
+ */
+export function isWorkspace(task: AgentTask | null): boolean {
+  return task != null && (task.source === "claudeCode" || task.id === "agent_codex");
+}
+
+/** The agent's own name, for pills and card labels (the ticker shows the project). */
+export function agentLabel(task: AgentTask | null): string {
+  if (!task || task.source === "claudeCode") return "Claude Code";
+  if (task.id === "agent_codex") return "Codex";
+  return task.name;
+}
+
+/**
+ * The grey label beside the name in the ticker and on cards. Claude Code's
+ * name is its project, so the label names the agent; Codex is always called
+ * Codex and reads "Codex · Integration", like its idle card.
+ */
+export function sessionLabel(task: AgentTask | null): string {
+  if (task?.id === "agent_codex") return "Integration";
+  return agentLabel(task);
+}
+
 export type PillBadge = "approval" | "finished" | "error";
 
 export interface AgentTask {
@@ -33,6 +59,8 @@ export interface ApprovalInfo {
   sessionId: string;
   tool: string;
   command: string;
+  /** The pill that asked: Claude Code or Codex. */
+  pillId: string;
 }
 
 export interface ChatMessage {
@@ -66,7 +94,7 @@ const task = (
 /** AgentTask.integrationAgents — same ids, names and colours as macOS. */
 export const INTEGRATION_AGENTS: AgentTask[] = [
   task("integration_claude", "Claude Code", "#F5F6F8", "claudeCode"),
-  task("agent_codex", "Codex", "#E879F9", "agent"),
+  task("agent_codex", "Codex", "#7DD3FC", "agent"),
   task("integration_resend", "Resend", "#22C55E", "n8n"),
   task("integration_n8n", "n8n", "#F29B38", "n8n"),
   task("integration_vercel", "Vercel", "#7C5CFF", "n8n"),

@@ -1,8 +1,9 @@
 # Windows Codex integration: progress and next phases
 
-Last updated: 3 October 2026, late evening: Claude's Mochi now chats on the
-user's Claude plan through Claude Code, confirmed live in the island (section 9);
-the upstream review is in [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
+Last updated: 3 October 2026, night: upstream Coucou 0.1.4 is merged, and the
+Codex pill now matches Claude Code's, approvals included (section 10). Claude's
+Mochi chats on the user's Claude plan (section 9); the upstream review is in
+[UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
 This is the engineering handoff for Konstantinos and Zack on the
 [kojos03/coucou fork](https://github.com/kojos03/coucou). The Windows work is
@@ -14,17 +15,20 @@ development.
 | `windows-codex` | [ee6176f — Fix Windows Codex activity and completion lifecycle](https://github.com/kojos03/coucou/commit/ee6176f7c42103de18d298d3a90969097204665f) | Pushed; integration baseline |
 | `windows-codex-documentation` | [2967bb8 — Document Windows Codex progress and next phases](https://github.com/kojos03/coucou/commit/2967bb80ad60e8e7dbeb6d64ebad011ecb4ec047), on top of `ee6176f` | Pushed |
 | `windows-phase1` | [3a8f2cd — Fix Windows launch actions and Mochi chat setup](https://github.com/kojos03/coucou/commit/3a8f2cdea98b3e1d9cc50349b6a94e9dd9ac6b50) and `c95d7ee` (review fix and this note), on top of `2967bb8` | Pushed; not merged into `windows-codex` or `main` |
-| `windows-codex-claude` | **Main working version.** Two Mochis and chats (section 7), subscriptions, Codex hook setup and named pills (section 8), Claude's Mochi on the Claude plan (section 9), on top of `windows-phase1` | Pushed; not merged |
+| `windows-codex-claude` | **Main working version.** Two Mochis and chats (section 7), subscriptions, Codex hook setup and named pills (section 8), Claude's Mochi on the Claude plan (section 9), upstream 0.1.4 merged and Codex approvals and visual parity (section 10), on top of `windows-phase1` | Pushed; not merged |
 
 **Current status:** `windows-codex-claude` is the main working version. It
 passes every automated check natively on Windows, including the opt-in native
 tests, and the release build runs on the development machine. Claude's Mochi
 answered live in the island on the user's Claude Pro plan, with web search and a
-follow-up turn (section 9). Not yet confirmed: a live reply from Codex's Mochi
-(the ChatGPT plan's Codex usage limit runs until 4 October), file drops on
-either plan, and a prolonged Claude Code + Codex session. Phase 2 is implemented
-on this branch; Phases 3 and 4 are proposed work, and the upstream features to
-port are planned in [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
+follow-up turn (section 9). Codex approvals work end to end through the real
+relay and island with simulated Codex events (section 10). Not yet confirmed: a
+real Codex session asking for approval (needs the hooks repair and Codex usage,
+which resumes on 4 October), a live reply from Codex's Mochi, file drops on
+either plan, and a prolonged Claude Code + Codex session. Phases 2 and 3 are
+implemented on this branch; Phase 4 is proposed work, and the remaining
+upstream features are planned in
+[UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
 ## What has been completed
 
@@ -389,6 +393,78 @@ reviewed the same evening. Its 17 new commits are macOS-only and merge without
 conflicts; the features worth porting and their order are in
 [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
+### 10. Upstream 0.1.4, Codex approvals and the Codex pill (`windows-codex-claude`)
+
+**Upstream merged.** Louis-CFM/coucou `main` at `35886ec` (0.1.4) is merged as
+`9fbe01a`: no conflicts and nothing under `windows/` changed. The Windows checks
+were rerun on the merge (npm 32/32, tsc, cargo 36 passed).
+
+**Codex approvals (Phase 3).** Checked against the installed Codex 0.160 first:
+its hook engine knows `PermissionRequest` and `Interrupt`, the `statusMessage`
+handler field, and the decision `{"hookSpecificOutput":{"hookEventName":
+"PermissionRequest","decision":{"behavior":"allow"|"deny","message":…}}}`;
+`updatedPermissions` and `updatedInput` make the hook fail closed, so there is
+no "Always". The relay already printed exactly that shape.
+
+- [codex_hooks.rs](../windows/src-tauri/src/codex_hooks.rs) registers
+  `PermissionRequest` (synchronous, 120 s timeout, statusMessage *Waiting for
+  your answer in Coucou*) and `Interrupt`. Repair leaves the 8 existing entries
+  byte-identical, so Codex only asks the user to review the 2 new ones.
+- [pipe.rs](../windows/src-tauri/src/pipe.rs): while a request waits, Coucou
+  also notices the relay hanging up (the agent stopped waiting) and tells the
+  island (`approval-gone`).
+- [hooks.ts](../windows/src/island/hooks.ts): a Codex request gets the same
+  card as Claude Code: one card at a time, acknowledged within 800 ms, gone after
+  110 s, a badge and a reveal when another pill is focused. The card shows the
+  command, or the files of an `apply_patch`. It comes down with *Handled in
+  Codex.* when the relay hangs up, or when the same chat stops, ends, is
+  interrupted or gets a new prompt (the waiting request is then released).
+  Clicking a pill that asks for permission opens its card. Other agents still
+  decline, as before.
+
+**The Codex pill, on a par with Claude Code's** (at the user's request: the name
+stays *Codex*, the second label reads *Integration*, the colour is light blue
+`#7DD3FC` instead of pink):
+
+- No chat running: an integration card like Claude Code's: *Codex ·
+  Integration*, a status dot (green *Connected*, amber *Connected · repair
+  hooks*, red *Hooks not installed*), **Open Codex** when the Codex app from the
+  Microsoft Store is installed (started through `shell:AppsFolder`), and
+  **Refresh** or **Settings…** (which opens the Codex section).
+- During a chat: the ticker reads *Codex · Integration* with the steps, using the
+  macOS labels for Codex's tools (`apply_patch` shows the file, `update_plan`,
+  `spawn_agent`, `mcp__server__tool`, and shell verbs, PowerShell included). A
+  new chat plays the work sound, a rate limit its sound, and a finished turn
+  settles to idle after 5.2 s keeping its steps, as Claude Code's does.
+- Cards: *Codex finished*; the error card names Codex (it said Claude Code); the
+  question card says *Codex is asking a question*; the island's settings row
+  shows a Codex hooks badge next to Claude Code's.
+
+**Ticker fixes, for Claude Code too.** Switching pills kept the previous pill's
+lines; queued steps stalled whenever the Mochi stood still (its motion was the
+only thing keeping the frame loop alive); and WebView2 drew the current row on
+top of the completed one after a transition (the rows' `will-change` layers).
+The last one was found by comparing the DOM, read through WebView2's DevTools
+protocol on a debug launch, with a capture of the screen.
+
+**Verified on Windows, 3 October, night:**
+
+| Check | Result |
+|---|---|
+| `npm test` | 46/46 (25 hook, 15 Phase 1 and chat, 6 Codex view tests) |
+| `npx tsc --noEmit` | Pass |
+| `cargo test -p coucou --lib --locked` | 38 passed, 7 ignored, no warnings |
+| `npx tauri build --no-bundle` | Built after each round, no warnings |
+| Simulated Codex chat through the real relay into the running app | Ticker, approval cards for a command and for a patch, idle card with *Connected · repair hooks* and **Open Codex** |
+| Allow | Clicked on the card: the relay printed `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}` and exited. The user also clicked Allow on two simulated cards |
+| Codex stops waiting | The relay was killed 1.2 s after its request: the log shows the hang-up and the card turned into *Handled in Codex.* within a second |
+
+**Not verified:** a real Codex session asking for approval (needs **Repair
+hooks…** in Settings, `/hooks` in Codex, and Codex usage, which resumes on
+4 October); **Deny** answered to a real Codex; real `Interrupt` events;
+clicking **Open Codex**; writing the real `hooks.json` from Settings (left for
+the user's click).
+
 ## Where the implementation lives
 
 | File | Responsibility |
@@ -408,7 +484,8 @@ conflicts; the features worth porting and their order are in
 | [chat.ts](../windows/src/views/chat.ts) | Chat per Mochi, errors, retry, and the Chat settings action |
 | [settings](../windows/src/settings/main.ts) and [hook installer](../windows/src-tauri/src/hooks.rs) | Settings window (hooks for both agents, both Mochis' sign-in and connection test) and Claude Code hook installation |
 | [pipe.rs](../windows/src-tauri/src/pipe.rs) and [relay](../windows/hook/src/main.rs) | Native transport and hook forwarding |
-| [hooks.test.mjs](../windows/tests/hooks.test.mjs) | 17 lifecycle, routing and pill tests |
+| [hooks.test.mjs](../windows/tests/hooks.test.mjs) | 25 lifecycle, routing, pill and approval tests |
+| [codex-views.test.mjs](../windows/tests/codex-views.test.mjs) | 6 view tests: the Codex card, ticker, cards and settings badge |
 | [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 15 view tests: Phase 1, both Mochis and their sign-in choices, the Claude hand-off, and the Codex hooks section |
 
 ## What was verified
@@ -489,17 +566,19 @@ Items 4 and 5 also cover the Codex lifecycle work.
 
 ## Recommended next change
 
-1. **Finish the live checks on the main working version.** After the Codex
-   usage limit resets (4 October), ask Codex's Mochi a question, one needing
+1. **Repair the Codex hooks and try a real approval.** In Settings → Codex,
+   **Repair hooks…** (adds PermissionRequest and Interrupt), then `/hooks` in
+   Codex to trust them. After the Codex usage limit resets (4 October), ask
+   Codex for something that needs approval and answer from the island, once
+   with Allow and once with Deny.
+2. **Finish the other live checks.** Ask Codex's Mochi a question, one needing
    web search, and one about a dropped image. Drop an image and a PDF on
-   Claude's Mochi. Switch **Sign in with** by hand in Settings. Claude Code is
-   now signed in and its hooks are installed: confirm a Claude Code session
-   lights up the Claude Code pill next to a Codex session.
-2. **Merge upstream `main`** (no conflicts, macOS-only changes) so the fork
-   follows upstream's rules and docs, then port features in the order of
-   [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md), starting with
-   Codex approvals (Phase 3), whose protocol upstream has now settled.
-3. **Decide review items 1–3 and merge** `windows-codex-claude` (which
+   Claude's Mochi. Switch **Sign in with** by hand in Settings. Confirm a Claude
+   Code session lights up the Claude Code pill next to a Codex session.
+3. **Continue the upstream ports** in the order of
+   [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md): Claude plan
+   usage next.
+4. **Decide review items 1–3 and merge** `windows-codex-claude` (which
    contains `windows-phase1`) into `windows-codex` once the checks above pass.
 
 ## Next phases
@@ -526,6 +605,9 @@ flow, observe prompt/tool/Stop delivery, and remove only Coucou's entries.
 Test absent files, existing unrelated hooks, malformed JSON, and failed writes.
 
 ### Phase 3 — Codex approvals
+
+**Implemented on `windows-codex-claude`** (section 10). Still open: the live
+check with a real Codex session. The original plan follows.
 
 **Current gap:** external-agent `PermissionRequest` events are declined by
 Coucou without a decision so the originating agent can handle them. Codex

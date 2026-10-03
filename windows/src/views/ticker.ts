@@ -95,6 +95,18 @@ export class Ticker {
     return this.startMs != null || this.queue.length > 0;
   }
 
+  /**
+   * Forgets what was on screen. The overview shares one ticker between pills:
+   * without this, focusing another pill kept the previous pill's lines (or
+   * queued the new pill's steps after them), and a transition interrupted by
+   * the switch could leave two rows on top of each other.
+   */
+  reset() {
+    this.queue = [];
+    this.startMs = null;
+    this.displayIndex = -1;
+  }
+
   sync(task: AgentTask | null) {
     const steps = task && task.steps.length > 0 ? task.steps : ["…"];
     const idx = task ? Math.min(task.stepIndex, steps.length - 1) : -1;

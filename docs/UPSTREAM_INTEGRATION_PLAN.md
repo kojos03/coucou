@@ -94,9 +94,11 @@ treat it as its own change.
 
 ## Suggested order
 
-1. Merge upstream `main` (no conflicts) on a short branch, run the Windows
-   checks, merge into `windows-codex-claude`.
-2. Codex approvals (#130): the most-requested missing piece and Phase 3.
+1. ~~Merge upstream `main`~~ — **done** (`9fbe01a`, 3 October).
+2. ~~Codex approvals (#130)~~ — **done** on `windows-codex-claude`, with the
+   Codex pill brought to parity with Claude Code's
+   ([status, section 10](WINDOWS_CODEX_STATUS.md)). Live check with a real
+   Codex session pending.
 3. Claude plan usage (#159): small, and the compliant way to surface the Claude
    subscription in Coucou.
 4. Answer Claude questions (#165), then live diff (#177/#179).

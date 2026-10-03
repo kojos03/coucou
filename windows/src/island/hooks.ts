@@ -5,11 +5,15 @@
 
 import { Bridge, onEvent } from "../core/bridge";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, type AgentTask } from "../core/state";
 import type { Island } from "./island";
-import { CodexSessions } from "./codex-sessions";
+import { CodexSessions, type CodexSession } from "./codex-sessions";
 
 const CLAUDE_ID = "integration_claude";
+const CODEX_ID = "agent_codex";
+
+/** Codex's chats; the pill shows the one CodexSessions selects. */
+let sessions = new CodexSessions();
 
 /** Clears the approval card if no decision was made before the hook gave up. */
 let pendingTimeout: number | null = null;
@@ -80,19 +84,70 @@ const TOOL_LABELS: Record<string, string> = {
   MultiEdit: "Modifie",
   NotebookEdit: "Notebook",
   PowerShell: "Exécute",
+  // Codex tools
+  apply_patch: "Modifie",
+  update_plan: "Tâches",
+  spawn_agent: "Agent",
 };
 
+/** Tools whose `command` is a shell command line. */
+const SHELL_TOOLS = new Set(["Bash", "PowerShell", "shell", "shell_command", "exec_command", "local_shell"]);
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** A command as one string; some agents send it as a list of arguments. */
+function commandOf(input: Record<string, unknown>): string | null {
+  const cmd = input.command;
+  if (typeof cmd === "string") return cmd;
+  if (Array.isArray(cmd) && cmd.length > 0 && cmd.every((part) => typeof part === "string")) return cmd.join(" ");
+  return null;
+}
+
+/** bashVerb() from the macOS app, plus the PowerShell spellings. */
+function shellVerb(command: string): string {
+  const first = (command.trim().split(/\s+/)[0] ?? "").toLowerCase();
+  if (["cat", "bat", "head", "tail", "less", "more", "nl", "type", "get-content", "gc"].includes(first)) return "Lit";
+  if (["rg", "grep", "find", "fd", "ls", "tree", "wc", "dir", "get-childitem", "gci", "select-string", "sls"].includes(first)) {
+    return "Cherche";
+  }
+  const runners = ["pytest", "vitest", "jest", "npm test", "npm run test", "cargo test", "go test",
+    "swift test", "make test", "xcodebuild test", "unittest"];
+  if (runners.some((runner) => command.includes(runner))) return "Teste";
+  return "Exécute";
+}
+
+/** The files a Codex apply_patch touches, by name. */
+function patchFiles(patch: string): string[] {
+  const files: string[] = [];
+  for (const line of patch.split(/\r?\n/)) {
+    const match = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/.exec(line.trim());
+    if (match) files.push(lastPathComponent(match[1].trim()));
+  }
+  return files;
+}
+
 function stepLabel(tool: string, input: Record<string, unknown>): string {
-  const label = TOOL_LABELS[tool] ?? tool;
+  let label = TOOL_LABELS[tool] ?? tool;
+  // MCP tools arrive as mcp__server__tool: show "server · tool".
+  if (tool.startsWith("mcp__")) {
+    const parts = tool.slice(5).split("__");
+    label = parts.length >= 2 ? `${parts[0]} · ${parts.slice(1).join("__")}` : tool.slice(5);
+  }
   const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : null);
-  const cmd = str("command");
-  if (cmd) return `${label} · ${cmd.slice(0, 40)}`;
+  const cmd = commandOf(input);
+  if (tool === "apply_patch") {
+    const files = patchFiles(cmd ?? "");
+    return files.length ? `${label} · ${files[0]}` : label;
+  }
+  if (cmd) return `${SHELL_TOOLS.has(tool) ? shellVerb(cmd) : label} · ${oneLine(cmd).slice(0, 40)}`;
   const path = str("path");
   if (path) return `${label} · ${lastPathComponent(path)}`;
   const file = str("file_path");
   if (file) return `${label} · ${lastPathComponent(file)}`;
   const query = str("query");
-  if (query) return `${label} · ${query.slice(0, 40)}`;
+  if (query) return `${label} · ${oneLine(query).slice(0, 40)}`;
   return label;
 }
 
@@ -115,6 +170,13 @@ const APPROVAL_FIELDS = [
 ] as const;
 
 function approvalTarget(tool: string, input: Record<string, unknown>): string {
+  const cmd = commandOf(input);
+  // A Codex patch is a whole diff: name the files it changes instead.
+  if (tool === "apply_patch" && cmd) {
+    const files = patchFiles(cmd);
+    if (files.length) return `${tool} · ${files.join(", ")}`;
+  }
+  if (cmd?.trim()) return `${tool} · ${cmd.trim()}`;
   for (const field of APPROVAL_FIELDS) {
     const value = input[field];
     if (typeof value === "string" && value.trim()) {
@@ -140,12 +202,92 @@ function clearSession() {
   t.pillBadge = null;
 }
 
-export function registerHookHandlers(island: Island) {
-  const codex = new CodexSessions();
-  void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload, codex));
+/** Puts the selected Codex chat on the Codex pill: its steps, state, badge and
+ * folder (for Open terminal). The pill and its Mochi keep the name Codex. */
+function showCodex(task: AgentTask, current: CodexSession | null, focused: boolean) {
+  task.state = current?.state ?? "idle";
+  task.steps = [...(current?.steps ?? [])];
+  task.stepIndex = Math.max(0, task.steps.length - 1);
+  task.sessionCwd = current?.cwd ?? null;
+  const asking = State.pendingApproval?.pillId === CODEX_ID;
+  if (asking) task.state = "approval";
+  task.pillBadge = focused ? null
+    : asking ? "approval"
+    : task.state === "finished" || task.state === "error" ? task.state : null;
 }
 
-function handleHook(island: Island, payload: HookPayload, codex: CodexSessions) {
+function refreshCodex() {
+  const task = State.tasks.find((entry) => entry.id === CODEX_ID);
+  if (!task) return;
+  showCodex(task, sessions.current(), State.focusId === CODEX_ID);
+  State.notify();
+}
+
+const agentOf = (pillId: string) => (pillId === CODEX_ID ? "Codex" : "Claude Code");
+
+/**
+ * The approval card is done with, answered or not: its pill goes back to work.
+ * The island's Allow / Deny buttons call this after sending the decision.
+ */
+export function approvalAnswered() {
+  const pending = State.pendingApproval;
+  if (!pending) return;
+  if (pendingTimeout != null) {
+    window.clearTimeout(pendingTimeout);
+    pendingTimeout = null;
+  }
+  State.pendingApproval = null;
+  State.isPinned = false;
+  if (pending.pillId === CODEX_ID) {
+    refreshCodex();
+  } else {
+    State.updateTask(CLAUDE_ID, "working");
+    State.setPillBadge(CLAUDE_ID, null);
+  }
+}
+
+/** Takes the card down without a decision; the agent asks on its own. */
+function releaseApproval(island: Island, note: string | null) {
+  if (!State.pendingApproval) return;
+  const onScreen = State.mode === "expanded" && State.view === "approval";
+  approvalAnswered();
+  island.dropPin();
+  if (State.view === "approval") {
+    if (note && onScreen) {
+      State.noteMessage = note;
+      island.setView("note");
+    } else {
+      island.setView(State.defaultView());
+    }
+  }
+  State.notify();
+}
+
+/** Events after which a pending request of the same session no longer matters. */
+const RESOLVING = ["Stop", "StopFailure", "UserPromptSubmit", "SessionEnd", "Interrupt"];
+
+/** The turn moved on without a click: free the relay and take the card down. */
+function resolveApprovalFor(island: Island, pillId: string, name: string, sessionId: string | undefined) {
+  const pending = State.pendingApproval;
+  if (!pending || pending.pillId !== pillId || !RESOLVING.includes(name)) return;
+  if (!pending.sessionId || pending.sessionId !== (sessionId ?? "")) return;
+  void Bridge.approvalDecline(pending.requestId);
+  releaseApproval(island, `Handled in ${agentOf(pillId)}.`);
+}
+
+export function registerHookHandlers(island: Island) {
+  sessions = new CodexSessions();
+  void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload));
+  // The agent stopped waiting before anyone clicked (its own timeout, an
+  // interrupted turn): take the card down rather than offer a dead button.
+  void onEvent<{ requestId: string }>("approval-gone", ({ requestId }) => {
+    const pending = State.pendingApproval;
+    if (!pending || pending.requestId !== requestId) return;
+    releaseApproval(island, `Handled in ${agentOf(pending.pillId)}.`);
+  });
+}
+
+function handleHook(island: Island, payload: HookPayload) {
   if (State.paused) {
     // Silence here used to cost Claude Code nearly two minutes: the relay waited
     // for a decision from an island that had already decided not to look. Say so,
@@ -197,22 +339,35 @@ const ensurePill = () => {
   }
 };
 
+  if (validAgent === "codex" && name === "SessionStart") {
+    // Informational for the pill, but the same cue as Claude Code's: a new chat
+    // gets the work sound and a peek at the island.
+    if (!sessions.knows(payload.session_id)) {
+      Sound.play("work");
+      surface("overview", false);
+    }
+    return;
+  }
+
   if (validAgent === "codex" && name !== "PermissionRequest") {
-    const result = codex.apply(payload, stepLabel(payload.tool_name ?? "Tool", payload.tool_input ?? {}));
+    resolveApprovalFor(island, CODEX_ID, name, payload.session_id);
+    const result = sessions.apply(payload, stepLabel(payload.tool_name ?? "Tool", payload.tool_input ?? {}));
     if (!result) return;
     ensurePill();
     const task = State.tasks.find((entry) => entry.id === agentId)!;
-    const current = result.current;
-    task.state = current?.state ?? "idle";
-    task.steps = [...(current?.steps ?? [])];
-    task.stepIndex = Math.max(0, task.steps.length - 1);
-    task.sessionCwd = current?.cwd ?? null;
-    task.pillBadge = !focused && (task.state === "finished" || task.state === "error")
-      ? task.state : null;
+    showCodex(task, result.current, focused);
     if (name === "UserPromptSubmit") State.setFocus(agentId);
+    if (result.rateLimited) Sound.play("rate");
     if (result.alert) {
       Sound.play(result.alert === "finished" ? "finish" : "error");
       if (State.focusId === agentId) surface(result.alert, true);
+      if (result.alert === "finished") {
+        // As Claude Code's pill does 5.2 s after Stop: back to idle, steps kept.
+        const { session_id: sessionId, turn_id: turnId } = payload;
+        window.setTimeout(() => {
+          if (sessions.settle(sessionId, turnId)) refreshCodex();
+        }, 5200);
+      }
     } else if (State.focusId === agentId) {
       // A new turn or a return to another active chat dismisses the old result.
       // Preserve Settings, chat, and other views the user opened deliberately.
@@ -220,11 +375,13 @@ const ensurePill = () => {
           task.state !== "finished" && task.state !== "error") {
         island.setView("overview");
       }
-      if (current) surface("overview", false);
+      if (result.current) surface("overview", false);
     }
     State.notify();
     return;
   }
+
+  if (agentId === CLAUDE_ID) resolveApprovalFor(island, CLAUDE_ID, name, payload.session_id);
 
   switch (name) {
     case "SessionStart":
@@ -331,10 +488,10 @@ const ensurePill = () => {
       break;
 
     case "PermissionRequest": {
-      // External agents do not get an approval card — showing one would look like
-      // a Claude Code request. Decline immediately so the agent re-asks in its
-      // terminal. Approval support for other agents will come with Codex support.
-      if (isExternalAgent) {
+      // Claude Code and Codex get the card. Other external agents do not —
+      // showing one would look like a Claude Code or Codex request. Decline
+      // immediately so the agent asks in its own terminal.
+      if (isExternalAgent && agentId !== CODEX_ID) {
         if (payload.request_id) void Bridge.approvalDecline(payload.request_id);
         break;
       }
@@ -347,7 +504,7 @@ const ensurePill = () => {
         if (requestId) void Bridge.approvalDecline(requestId);
         break;
       }
-      upsert(projectName, cwd);
+      if (agentId === CLAUDE_ID) upsert(projectName, cwd);
       if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";
       const input = payload.tool_input ?? {};
@@ -356,11 +513,13 @@ const ensurePill = () => {
         sessionId: payload.session_id ?? "",
         tool,
         command: approvalTarget(tool, input),
+        pillId: agentId,
       };
       // The relay's short ack window closes in 800 ms; everything below this
       // line is synchronous, so the card really is up by the time it lands.
       if (requestId) void Bridge.approvalAck(requestId);
-      State.updateTask(CLAUDE_ID, "approval");
+      if (agentId === CODEX_ID) refreshCodex();
+      else State.updateTask(CLAUDE_ID, "approval");
       State.isPinned = true;
       Sound.play("approval");
       if (focused) {
@@ -369,21 +528,15 @@ const ensurePill = () => {
         // Another agent holds the view, so the card would yank it away. The badge
         // is the signal instead — but it has to be on screen for that to mean
         // anything, hence the reveal. We just told the relay a human can act.
-        State.setPillBadge(CLAUDE_ID, "approval");
+        State.setPillBadge(agentId, "approval");
         island.reveal();
       }
       // Coucou answers within 108 s or not at all; after that the terminal has
       // taken over and the card would be lying.
       pendingTimeout = window.setTimeout(() => {
         pendingTimeout = null;
-        if (!State.pendingApproval) return;
-        State.pendingApproval = null;
-        State.isPinned = false;
-        island.dropPin();
-        State.updateTask(CLAUDE_ID, "working");
-        State.setPillBadge(CLAUDE_ID, null);
-        if (State.view === "approval") island.setView(State.defaultView());
-        State.notify();
+        if (State.pendingApproval?.requestId !== requestId) return;
+        releaseApproval(island, null);
       }, 110_000);
       break;
     }

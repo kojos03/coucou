@@ -5,7 +5,7 @@
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
-import { State, type AgentTask } from "../core/state";
+import { State, agentLabel, isWorkspace, sessionLabel, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
@@ -36,6 +36,8 @@ export interface ViewHost {
   focus?(): void;
   /** Called every frame while the view is on screen. */
   tick?(nowMs: number): void;
+  /** True while the view still has motion to finish; keeps the frame loop running. */
+  animating?(): boolean;
 }
 
 // ── Shared pieces ─────────────────────────────────────────────────────────────
@@ -165,6 +167,7 @@ function buildOverview(actions: ViewActions): ViewHost {
     tick(nowMs: number) {
       if (mode === "ticker") ticker.tick(nowMs);
     },
+    animating: () => mode === "ticker" && ticker.animating,
     sync() {
       const task = State.focusTask;
       if (task?.id !== lastFocus) {
@@ -174,16 +177,15 @@ function buildOverview(actions: ViewActions): ViewHost {
         mode = null;
       }
 
-      // VS Code with a live Claude Code session keeps the ticker; every other
-      // pill shows its own card, exactly like IntegrationCardView.
+      // Claude Code and Codex with a live session keep the ticker; with none
+      // they show their integration card, exactly like IntegrationCardView.
+      // Other agents only have a pill while a session runs.
       const sessionActive =
   task != null &&
   (
-    task.source === "agent" ||
-    (
-      task.source === "claudeCode" &&
-      (task.state !== "idle" || task.steps.length > 0)
-    )
+    isWorkspace(task)
+      ? task.state !== "idle" || task.steps.length > 0
+      : task.source === "agent"
   );
 
       if (task && sessionActive) {
@@ -192,6 +194,9 @@ function buildOverview(actions: ViewActions): ViewHost {
           leftBody.append(tickerBody);
           mode = "ticker";
           cardKey = "";
+          // Another pill, or a session after the idle card: start from this
+          // task's own lines.
+          ticker.reset();
         }
         clear(who);
         who.append(
@@ -199,12 +204,7 @@ function buildOverview(actions: ViewActions): ViewHost {
           h("span", { class: "name", text: task.name }),
           h("span", {
   class: "tool",
-  text:
-    task.source === "claudeCode"
-      ? "Claude Code"
-      : task.source === "agent"
-        ? task.name
-        : "n8n",
+  text: task.source === "n8n" ? "n8n" : sessionLabel(task),
 }),
         );
         if (task.steps.length > 1) {
@@ -244,8 +244,8 @@ function buildOverview(actions: ViewActions): ViewHost {
 }
 
 function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
-  // The Claude Code pill keeps its name while the ticker shows the project.
-  const label = task.id === "integration_claude" ? "Claude Code" : task.name;
+  // Claude Code and Codex keep their names while the ticker shows the project.
+  const label = isWorkspace(task) ? agentLabel(task) : task.name;
   const canvas = createMiniBot(task, 24);
   const pill = h(
     "div",
@@ -346,11 +346,15 @@ function buildQuestion(): ViewHost {
     el,
     sync() {
       clear(who);
-      who.append(agentWho(State.focusTask, "Claude Code is asking a question"));
       const task = State.focusTask;
-      title.textContent = task?.steps.at(-1) ?? "Claude needs an answer.";
+      const codex = task?.id === "agent_codex";
+      who.append(agentWho(task, `${codex ? "Codex" : "Claude Code"} is asking a question`));
+      title.textContent = task?.steps.at(-1) ?? (codex ? "Codex needs an answer." : "Claude needs an answer.");
       clear(row);
-      row.append(h("div", { class: "sub", text: "Answer in your terminal — Coucou can't reply for you yet." }));
+      row.append(h("div", {
+        class: "sub",
+        text: `Answer in ${codex ? "Codex" : "your terminal"} — Coucou can't reply for you yet.`,
+      }));
     },
   };
 }
@@ -371,7 +375,7 @@ function buildError(actions: ViewActions): ViewHost {
     sync() {
       const task = State.focusTask;
       clear(who);
-      who.append(agentWho(task, task?.source === "n8n" ? "n8n" : "Claude Code"));
+      who.append(agentWho(task, task?.source === "n8n" ? "n8n" : sessionLabel(task)));
       title.textContent = task?.source === "n8n" ? "Workflow stopped." : "Session stopped on an error.";
       detail.textContent = task?.steps.at(-1) ?? "No detail available.";
     },
@@ -394,7 +398,9 @@ function buildFinished(actions: ViewActions): ViewHost {
     sync() {
       clear(who);
       const task = State.focusTask;
-      const label = task?.source === "agent" ? `${task.name} finished` : "Claude Code finished";
+      // "Codex · finished": the name already says Codex.
+      const label = task?.id === "agent_codex" ? "finished"
+        : task?.source === "agent" ? `${agentLabel(task)} finished` : "Claude Code finished";
       who.append(agentWho(task, label));
       title.textContent = task?.steps.at(-1) ?? "Session finished";
     },
@@ -439,6 +445,7 @@ function buildSettings(actions: ViewActions): ViewHost {
     h("button", { onclick: () => actions.setAutoClose(s) }, `${s}s`),
   );
   const claudeBadge = h("span", { class: "status-badge" });
+  const codexBadge = h("span", { class: "status-badge" });
   const apiBadge = h("span", { class: "status-badge" });
 
   const rows = h(
@@ -456,6 +463,7 @@ function buildSettings(actions: ViewActions): ViewHost {
       "div",
       { class: "settings-row", style: "gap:14px" },
       claudeBadge,
+      codexBadge,
       apiBadge,
       h("div", { class: "grow" }),
       h("button", {
@@ -483,6 +491,11 @@ function buildSettings(actions: ViewActions): ViewHost {
       claudeBadge.append(
         dot(s.hooksInstalled ? "#22C55E" : "#F4505E", 6),
         h("span", { text: "Claude Code" }),
+      );
+      clear(codexBadge);
+      codexBadge.append(
+        dot(State.integrations.agent_codex?.configured ? "#22C55E" : "#F4505E", 6),
+        h("span", { text: "Codex" }),
       );
       clear(apiBadge);
       apiBadge.append(dot("#F4505E", 6), h("span", { text: "API" }));

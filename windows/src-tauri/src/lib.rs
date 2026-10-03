@@ -296,6 +296,17 @@ fn open_claude_code(question: String) -> Result<(), String> {
     launch::claude_code(&question)
 }
 
+/// "Open Codex" on the Codex card: the Codex desktop app, when installed.
+#[tauri::command]
+fn open_codex() -> Result<(), String> {
+    launch::codex_app()
+}
+
+#[tauri::command]
+fn codex_app_installed() -> bool {
+    launch::codex_app_installed()
+}
+
 #[tauri::command]
 fn codex_hooks_status() -> CodexHookStatus {
     codex_hooks::status()
@@ -310,8 +321,11 @@ fn codex_hooks_preview(install: bool) -> Result<HookPreview, String> {
 /// Writes ~/.codex/hooks.json — only after an explicit click, and only when the
 /// file still matches the preview the user looked at.
 #[tauri::command]
-fn codex_hooks_apply(install: bool, fingerprint: String) -> Result<String, String> {
-    codex_hooks::write(install, &fingerprint)
+fn codex_hooks_apply(app: AppHandle, install: bool, fingerprint: String) -> Result<String, String> {
+    let backup = codex_hooks::write(install, &fingerprint)?;
+    // The island's Codex card says whether the hooks are in place.
+    let _ = app.emit_to(island::WINDOW_LABEL, "codex-hooks-changed", ());
+    Ok(backup)
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -420,7 +434,7 @@ pub fn show_settings_window(app: &AppHandle) {
 #[tauri::command]
 fn open_settings_window(app: AppHandle, section: Option<String>) {
     show_settings_window(&app);
-    if let Some(target @ ("claude" | "openai")) = section.as_deref() {
+    if let Some(target @ ("claude" | "openai" | "codex")) = section.as_deref() {
         let _ = app.emit_to("settings", "settings-section", target);
     }
 }
@@ -463,6 +477,8 @@ pub fn run() {
             chat_reset,
             chat_test_connection,
             open_claude_code,
+            open_codex,
+            codex_app_installed,
             codex_hooks_status,
             codex_hooks_preview,
             codex_hooks_apply,

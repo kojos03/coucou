@@ -209,8 +209,8 @@ function codexSection(initial: CodexHookStatus): HTMLElement {
       h("div", {
         class: "hint",
         text: status.installed
-          ? "Coucou is hooked into your Codex sessions: prompts, tool calls and finished turns show up on the Codex pill."
-          : "Install the hooks to see your Codex sessions on the Codex pill. Codex approvals still happen in Codex.",
+          ? "Coucou is hooked into your Codex sessions: prompts, tool calls and finished turns show up on the Codex pill, and Codex's permission requests get Allow and Deny in the island."
+          : "Install the hooks to see your Codex sessions on the Codex pill and answer Codex's permission requests from the island.",
       }),
       h("div", { class: "row" },
         h("label", { text: "hooks.json" }),
@@ -768,11 +768,12 @@ async function main() {
   };
 
   const chats = [chatSection(CLAUDE_CHAT), chatSection(CODEX_CHAT)];
+  const codexHooks = codexSection(codex);
   clear(root);
   root.append(
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
     claudeSection(status),
-    codexSection(codex),
+    codexHooks,
     ...chats.map((chat) => chat.el),
     integrationsSection(present),
     generalSection(),
@@ -785,7 +786,9 @@ async function main() {
   // "Chat settings" in the island scrolls to the section of the Mochi that failed.
   const targets = [CLAUDE_CHAT, CODEX_CHAT];
   void onEvent<SettingsSection>("settings-section", (target) => {
-    chats[targets.findIndex((cfg) => cfg.target === target)]?.reveal();
+    // "Settings…" on the island's Codex card: the hooks.
+    if (target === "codex") codexHooks.scrollIntoView({ block: "start" });
+    else chats[targets.findIndex((cfg) => cfg.target === target)]?.reveal();
   });
 
   void onEvent<Settings>("settings-changed", (s) => {

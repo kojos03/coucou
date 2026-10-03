@@ -22,7 +22,24 @@ const clearTimers = new Map<string, number>();
 
 export function registerIntegrationHandlers(island: Island) {
   void onEvent<IntegrationUpdate>("integration", (update) => handle(island, update));
+  // Settings installed, repaired or removed the Codex hooks.
+  void onEvent<null>("codex-hooks-changed", () => void refreshCodexHooks());
   void refreshConfigured();
+}
+
+/** What the Codex card shows: whether the hooks are in place, and the app. */
+export async function refreshCodexHooks() {
+  const [status, app] = await Promise.all([
+    Bridge.codexHooksStatus().catch(() => null),
+    Bridge.codexAppInstalled().catch(() => null),
+  ]);
+  State.integrations.agent_codex = {
+    data: { anyInstalled: status?.anyInstalled ?? false, app: app === true },
+    error: status?.problem ?? null,
+    loaded: false,
+    configured: status?.installed ?? false,
+  };
+  State.notify();
 }
 
 /** Asks Rust which keys exist so the idle cards can say so. */
@@ -38,6 +55,7 @@ export async function refreshConfigured() {
   };
   State.integrations.integration_claude = { ...claude, configured: hooks };
   State.notify();
+  await refreshCodexHooks();
 }
 
 function handle(island: Island, update: IntegrationUpdate) {

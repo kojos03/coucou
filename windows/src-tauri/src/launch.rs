@@ -141,6 +141,31 @@ fn powershell(shell: &Path, cwd: &Path) -> Command {
     cmd
 }
 
+/// The Codex desktop app's Microsoft Store package family.
+const CODEX_APP: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+
+/// Windows keeps a data folder under %LOCALAPPDATA%\Packages for every Store
+/// app installed for the user, so its presence says the Codex app is there.
+pub fn codex_app_installed() -> bool {
+    cfg!(windows)
+        && std::env::var_os("LOCALAPPDATA")
+            .map(|dir| PathBuf::from(dir).join("Packages").join(CODEX_APP).is_dir())
+            .unwrap_or(false)
+}
+
+/// "Open Codex" on the Codex card, as on macOS: starts the Codex desktop app.
+pub fn codex_app() -> Result<(), String> {
+    if !codex_app_installed() {
+        return Err("The Codex app isn't installed. Start Codex from a terminal with `codex`.".into());
+    }
+    // A fixed shell: URI built from a constant, so nothing from outside reaches it.
+    Command::new("explorer.exe")
+        .arg(format!("shell:AppsFolder\\{CODEX_APP}!App"))
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "Could not open the Codex app.".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

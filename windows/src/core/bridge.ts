@@ -97,6 +97,9 @@ export const Bridge = {
     callOrThrow<void>("chat_test_connection", { provider, model }),
   /** Opens the official Claude Code with the question, on the user's own Claude sign-in. */
   openClaudeCode: (question: string) => callOrThrow<void>("open_claude_code", { question }),
+  /** "Open Codex": the Codex desktop app. */
+  openCodex: () => callOrThrow<void>("open_codex"),
+  codexAppInstalled: () => call<boolean>("codex_app_installed"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
@@ -121,7 +124,7 @@ export interface IntegrationUpdate {
 }
 
 /** Settings window sections that `openSettingsWindow` can scroll to. */
-export type SettingsSection = "claude" | "openai";
+export type SettingsSection = "claude" | "openai" | "codex";
 
 export function settingsSectionFor(provider: ChatProvider): SettingsSection {
   return provider === "openai" ? "openai" : "claude";

@@ -90,13 +90,22 @@ or need repair, and when Codex last reached Coucou. **Install hooks…** or
 when you click, leaves your own hooks alone, and never rewrites an entry that is
 already correct. After a change, Codex asks you to review the hooks: run `/hooks`
 in Codex and trust them. **Remove hooks…** takes out Coucou's entries only.
-Codex approvals still happen in Codex.
+
+The Codex pill then works like Claude Code's. While a chat runs, the ticker
+shows **Codex** with the project folder and each step; a finished turn opens
+**Codex finished** with **Open terminal** and **Open in VS Code**, then settles
+back to idle. When Codex asks for permission, the island shows the command or
+the files of a patch with **Deny** and **Allow** (there is no "Always": Codex
+doesn't accept one). Codex shows *Waiting for your answer in Coucou* meanwhile.
+If nobody clicks within 110 seconds, or Codex stops waiting first, the card goes
+away and Codex asks you itself. With no chat running, the pill shows whether the
+hooks are installed and **Open Codex** when the Codex app is installed.
 
 ## Chat and keys
 
 Coucou has two Mochis, shown as the **Claude Code** and **Codex** pills. The
 focused pill decides which one you chat with: with the Codex pill focused, Mochi
-is Codex pink and answers through **OpenAI**; with any other pill, it is white
+is Codex light blue and answers through **OpenAI**; with any other pill, it is white
 and answers through **Anthropic**. Each Mochi keeps its own conversation, and
 dropping a file starts a new one with both.
 

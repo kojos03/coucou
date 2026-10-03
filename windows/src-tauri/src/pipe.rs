@@ -14,11 +14,18 @@
 //   * whatever happens we drop the connection after the decision timeout, and
 //     the terminal takes over.
 //
+// The agent can also stop waiting first (its own timeout, an interrupted turn):
+// it ends the relay, the pipe closes, and the island is told to take its card
+// down rather than offer a click that can no longer reach anyone.
+//
 // What we write back is the bare word `allow` or `deny`. Turning that into the
 // documented hookSpecificOutput JSON is coucou-hook's job, so the wire format
 // Claude Code expects lives in exactly one place.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::pin;
+use std::task::Poll;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -231,7 +238,26 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
     log::line(format!("hook PermissionRequest id={id}"));
     let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
 
-    let decision = wait_for_decision(&id, &mut rx).await;
+    // Whichever comes first: the island's answer, or the relay hanging up.
+    let answered = {
+        let mut decided = pin!(wait_for_decision(&id, &mut rx));
+        let mut gone = pin!(hung_up(&mut pipe));
+        std::future::poll_fn(|cx| {
+            if let Poll::Ready(decision) = decided.as_mut().poll(cx) {
+                return Poll::Ready(Some(decision));
+            }
+            if gone.as_mut().poll(cx).is_ready() {
+                return Poll::Ready(None);
+            }
+            Poll::Pending
+        })
+        .await
+    };
+    let decision = answered.unwrap_or_else(|| {
+        log::line(format!("hook id={id} relay hung up — the agent stopped waiting"));
+        let _ = app.emit_to(WINDOW_LABEL, "approval-gone", json!({ "requestId": id }));
+        None
+    });
     app.state::<Pending>().0.lock().unwrap().remove(&id);
 
     // No decision: say nothing at all. coucou-hook then writes nothing to stdout
@@ -241,6 +267,18 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
         let _ = pipe.flush().await;
     }
     pipe.finish();
+}
+
+/// Resolves once the relay closes its end of the connection. It sends nothing
+/// after its one line, so any read that returns is either the close or noise.
+async fn hung_up(pipe: &mut (impl AsyncRead + Unpin)) {
+    let mut byte = [0u8; 1];
+    loop {
+        match pipe.read(&mut byte).await {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+    }
 }
 
 /// Two waits: a short one for "the card is up", then the long one for a human.
@@ -313,4 +351,21 @@ pub fn answer(app: &AppHandle, request_id: &str, decision: &str) {
     };
     log::line(format!("decision id={request_id} {word}"));
     send(app, request_id, Reply::Decision(word.to_string()), false);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_relay_that_hangs_up_is_noticed_and_a_waiting_one_is_not() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        rt.block_on(async {
+            let (mut server, client) = tokio::io::duplex(64);
+            // Still connected and silent, like a relay waiting for the decision.
+            assert!(tokio::time::timeout(Duration::from_millis(50), hung_up(&mut server)).await.is_err());
+            drop(client);
+            assert!(tokio::time::timeout(Duration::from_secs(1), hung_up(&mut server)).await.is_ok());
+        });
+    }
 }
