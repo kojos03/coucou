@@ -1,6 +1,8 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
 mod claude;
+mod codex_cli;
+mod codex_hooks;
 mod files;
 mod hooks;
 mod integrations;
@@ -22,6 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
 use claude::{Chat, ChatContext, ChatError, ChatReply};
+use codex_hooks::CodexHookStatus;
 use files::DroppedFile;
 use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
@@ -221,10 +224,12 @@ enum ChatProvider {
 }
 
 /// One conversation per Mochi, so switching pills never mixes the two histories.
+/// Codex's Mochi keeps one per sign-in method, since their formats differ.
 #[derive(Default)]
 struct Chats {
     anthropic: Chat,
     openai: Chat,
+    codex: Chat,
 }
 
 /// One chat turn. The API key and any file bytes stay on the Rust side.
@@ -236,12 +241,13 @@ async fn chat_send(
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, ChatError> {
-    let (model, openai_model) = {
+    let (model, openai_model, codex_sign_in) = {
         let settings = shared.settings.lock().unwrap();
-        (settings.model.clone(), settings.openai_model.clone())
+        (settings.model.clone(), settings.openai_model.clone(), settings.openai_auth != "apiKey")
     };
     match provider {
         ChatProvider::Anthropic => claude::send(&chats.anthropic, &model, query, context).await,
+        ChatProvider::Openai if codex_sign_in => codex_cli::send(&chats.codex, query, context).await,
         ChatProvider::Openai => openai::send(&chats.openai, &openai_model, query, context).await,
     }
 }
@@ -251,14 +257,47 @@ async fn chat_send(
 fn chat_reset(chats: State<Chats>) {
     chats.anthropic.reset();
     chats.openai.reset();
+    chats.codex.reset();
+}
+
+/// Checks the saved key and model, or that Codex is signed in. Sends no message.
+#[tauri::command]
+async fn chat_test_connection(
+    shared: State<'_, Shared>,
+    provider: ChatProvider,
+    model: String,
+) -> Result<(), ChatError> {
+    let codex_sign_in = shared.settings.lock().unwrap().openai_auth != "apiKey";
+    match provider {
+        ChatProvider::Anthropic => claude::test_connection(&model).await,
+        ChatProvider::Openai if codex_sign_in => codex_cli::test_connection().await,
+        ChatProvider::Openai => openai::test_connection(&model).await,
+    }
+}
+
+/// "Ask in Claude Code": the question opens in the official Claude Code, which
+/// runs on the user's own Claude sign-in.
+#[tauri::command]
+fn open_claude_code(question: String) -> Result<(), String> {
+    launch::claude_code(&question)
 }
 
 #[tauri::command]
-async fn chat_test_connection(provider: ChatProvider, model: String) -> Result<(), ChatError> {
-    match provider {
-        ChatProvider::Anthropic => claude::test_connection(&model).await,
-        ChatProvider::Openai => openai::test_connection(&model).await,
-    }
+fn codex_hooks_status() -> CodexHookStatus {
+    codex_hooks::status()
+}
+
+/// Diff to show before anything is written to ~/.codex/hooks.json.
+#[tauri::command]
+fn codex_hooks_preview(install: bool) -> Result<HookPreview, String> {
+    codex_hooks::preview(install)
+}
+
+/// Writes ~/.codex/hooks.json — only after an explicit click, and only when the
+/// file still matches the preview the user looked at.
+#[tauri::command]
+fn codex_hooks_apply(install: bool, fingerprint: String) -> Result<String, String> {
+    codex_hooks::write(install, &fingerprint)
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -409,6 +448,10 @@ pub fn run() {
             chat_send,
             chat_reset,
             chat_test_connection,
+            open_claude_code,
+            codex_hooks_status,
+            codex_hooks_preview,
+            codex_hooks_apply,
             ingest_file,
             secret_present,
             secret_set,

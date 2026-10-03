@@ -55,6 +55,73 @@ pub fn terminal(path: Option<&str>) -> Result<(), String> {
     }
 }
 
+/// Opens the official Claude Code in a terminal with the user's question, so it
+/// runs on their own Claude sign-in: Anthropic does not let apps route chat
+/// through a Claude subscription themselves. The question travels in a file in
+/// Coucou's folder, mentioned as `@file`, so nothing the user typed reaches a
+/// command line.
+pub fn claude_code(question: &str) -> Result<(), String> {
+    let question = question.trim();
+    if question.is_empty() {
+        return Err("Type a question first.".into());
+    }
+    let claude = find_claude().ok_or(
+        "Claude Code was not found. Install it, sign in once by running `claude` in a terminal, then try again.",
+    )?;
+    let dir = crate::settings::local_dir().join("mochi").join("claude");
+    std::fs::create_dir_all(&dir).map_err(|_| "Could not prepare the folder for Claude Code.".to_string())?;
+    let name = handoff_file(&dir, question)?;
+    #[cfg(windows)]
+    {
+        let prompt = format!("@{name}");
+        if let Some(wt) = platform::find_on_path("wt") {
+            if platform::no_console(&mut claude_tab(&wt, &claude, &dir, &prompt)).spawn().is_ok() {
+                return Ok(());
+            }
+        }
+        claude_console(&claude, &dir, &prompt).spawn().map(|_| ())
+            .map_err(|_| "Could not open Claude Code. Check its installation and try again.".into())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (claude, name);
+        Err("Opening Claude Code from Mochi is currently available on Windows.".into())
+    }
+}
+
+/// Saves the question and returns its file name: letters, digits, `-` and `.` only.
+fn handoff_file(dir: &Path, question: &str) -> Result<String, String> {
+    let name = format!("question-{}.md", crate::hooks::stamp());
+    std::fs::write(dir.join(&name), format!("A question passed on from Coucou's Mochi:\n\n{question}\n"))
+        .map_err(|_| "Could not save the question for Claude Code.".to_string())?;
+    Ok(name)
+}
+
+fn find_claude() -> Option<PathBuf> {
+    platform::find_on_path("claude").or_else(|| {
+        // Where the native installer puts it, until a restart picks up the new PATH.
+        let exe = if cfg!(windows) { "claude.exe" } else { "claude" };
+        let installed = platform::home_dir().join(".local").join("bin").join(exe);
+        installed.is_file().then_some(installed)
+    })
+}
+
+#[cfg(windows)]
+fn claude_tab(wt: &Path, claude: &Path, dir: &Path, prompt: &str) -> Command {
+    let mut cmd = Command::new(wt);
+    cmd.current_dir(dir).args(["-w", "0", "new-tab", "--startingDirectory", "."]).arg(claude).arg(prompt);
+    cmd
+}
+
+#[cfg(windows)]
+fn claude_console(claude: &Path, dir: &Path, prompt: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new(claude);
+    // The user's explicit hand-off, so the console must be visible.
+    cmd.creation_flags(0x0000_0010).current_dir(dir).arg(prompt);
+    cmd
+}
+
 #[cfg(windows)]
 fn terminal_tab(wt: &Path, shell: &Path, cwd: &Path) -> Command {
     let mut cmd = Command::new(wt);
@@ -89,6 +156,28 @@ mod tests {
         assert!(working_directory(executable.to_str()).is_err());
         let absent = std::env::temp_dir().join("coucou-folder-that-does-not-exist");
         assert!(working_directory(absent.to_str()).is_err());
+    }
+
+    #[test]
+    fn the_claude_hand_off_keeps_the_question_off_the_command_line() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("coucou-handoff-{unique}"));
+        std::fs::create_dir(&dir).unwrap();
+        let question = "What's 2 & 2; \"quoted\" %TEMP% $env:X";
+        let name = handoff_file(&dir, question).unwrap();
+        assert!(name.starts_with("question-") && name.ends_with(".md"));
+        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.'));
+        assert!(std::fs::read_to_string(dir.join(&name)).unwrap().contains(question));
+        #[cfg(windows)]
+        {
+            let prompt = format!("@{name}");
+            let tab = claude_tab(Path::new("wt.exe"), Path::new("claude.exe"), &dir, &prompt);
+            assert_eq!(tab.get_current_dir(), Some(dir.as_path()));
+            let args: Vec<_> = tab.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+            assert_eq!(args.last(), Some(&prompt));
+            assert!(!args.iter().any(|a| a.contains("2 & 2")));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(windows)]

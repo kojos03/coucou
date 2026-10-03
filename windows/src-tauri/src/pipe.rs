@@ -20,8 +20,8 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
@@ -57,6 +57,24 @@ pub enum Reply {
 pub struct Pending(pub Mutex<HashMap<String, mpsc::Sender<Reply>>>);
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// When each agent last reached us, for the delivery line in Settings.
+static LAST_EVENT: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+fn note_event(payload: &Value) {
+    // Payloads without a tag come from Claude Code, as everywhere else.
+    let agent = payload.get("coucou_agent").and_then(Value::as_str).unwrap_or("claude");
+    if agent.len() > 24 {
+        return;
+    }
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    LAST_EVENT.get_or_init(Default::default).lock().unwrap().insert(agent.to_string(), now);
+}
+
+/// Unix seconds of the last event from `agent` since Coucou started.
+pub fn last_event(agent: &str) -> Option<u64> {
+    LAST_EVENT.get()?.lock().unwrap().get(agent).copied()
+}
 
 /// `\\.\pipe\coucou-<sid>` — must match coucou-hook's `pipe_path()` exactly.
 #[cfg(windows)]
@@ -188,6 +206,7 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
     if !payload.is_object() {
         return;
     }
+    note_event(&payload);
 
     let event = payload
         .get("hook_event_name")

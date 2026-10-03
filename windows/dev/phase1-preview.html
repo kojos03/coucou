@@ -9,6 +9,13 @@
   Bridge.boot = async () => null;
   Bridge.hooksStatus = async () => ({ installed: false, settingsPath: "", hookPath: "", hookReady: false });
   Bridge.secretPresent = async () => false;
+  Bridge.codexHooksStatus = async () => ({
+    path: "C:\\Users\\you\\.codex\\hooks.json", exists: true, problem: null,
+    hookPath: "C:\\Users\\you\\AppData\\Local\\Coucou\\bin\\coucou-hook.exe", hookReady: true,
+    events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "SessionEnd"]
+      .map((event) => ({ event, state: "ok" })),
+    installed: true, anyInstalled: true, lastEvent: Math.round(Date.now() / 1000) - 180,
+  });
   Bridge.openSettingsWindow = async () => { location.search = "?settings"; };
   Bridge.chatSend = async (provider) => { throw {
     code: "missing_key", settings: true,

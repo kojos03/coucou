@@ -23,6 +23,10 @@ pub struct Settings {
     /// OpenAI model used by Codex's Mochi (the chat while the Codex pill is focused).
     #[serde(default = "default_openai_model")]
     pub openai_model: String,
+    /// How Codex's Mochi signs in: "codex" (the Codex CLI's own sign-in, so a
+    /// ChatGPT plan) or "apiKey" (an OpenAI API key in the credential store).
+    #[serde(default = "default_openai_auth")]
+    pub openai_auth: String,
 }
 
 fn default_model() -> String {
@@ -31,6 +35,10 @@ fn default_model() -> String {
 
 fn default_openai_model() -> String {
     crate::openai::DEFAULT_MODEL.to_string()
+}
+
+fn default_openai_auth() -> String {
+    "codex".to_string()
 }
 
 impl Default for Settings {
@@ -51,6 +59,7 @@ impl Default for Settings {
             hooks_installed: false,
             model: default_model(),
             openai_model: default_openai_model(),
+            openai_auth: default_openai_auth(),
         }
     }
 }

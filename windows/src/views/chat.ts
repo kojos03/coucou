@@ -62,9 +62,16 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   let errorFor: ChatProvider | null = null;
   let renderedKey = "";
 
-  function showError(provider: ChatProvider, err: unknown) {
+  function showError(provider: ChatProvider, err: unknown, question: string) {
     const failure = chatFailure(err);
     const actions = h("div", { class: "actions" });
+    // Claude's Mochi cannot use a Claude plan itself; Claude Code can.
+    if (provider === "anthropic" && failure.code === "missing_key") {
+      actions.append(h("button", {
+        class: "btn secondary", text: "Ask in Claude Code",
+        onclick: () => void handOff(question),
+      }));
+    }
     if (failure.settings) {
       actions.append(h("button", {
         class: "btn secondary", text: "Chat settings",
@@ -75,6 +82,20 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     clear(errorBox);
     errorBox.append(h("div", { text: failure.message }), actions);
     errorFor = provider;
+  }
+
+  async function handOff(question: string) {
+    let note = "Your question is open in Claude Code, which uses your Claude sign-in.";
+    try {
+      await Bridge.openClaudeCode(question);
+      if (input.value.trim() === question) input.value = "";
+    } catch (err) {
+      note = chatFailure(err).message;
+    }
+    clear(errorBox);
+    errorBox.append(h("div", { text: note }));
+    errorFor = "anthropic";
+    State.notify();
   }
 
   async function submit() {
@@ -118,7 +139,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         const index = history.indexOf(message);
         if (index >= 0) history.splice(index, 1);
         input.value = query;
-        showError(provider, err);
+        showError(provider, err, query);
         Sound.play("error");
       }
     } finally {

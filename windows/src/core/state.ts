@@ -65,7 +65,7 @@ const task = (
 
 /** AgentTask.integrationAgents — same ids, names and colours as macOS. */
 export const INTEGRATION_AGENTS: AgentTask[] = [
-  task("integration_claude", "VS Code", "#F5F6F8", "claudeCode"),
+  task("integration_claude", "Claude Code", "#F5F6F8", "claudeCode"),
   task("agent_codex", "Codex", "#E879F9", "agent"),
   task("integration_resend", "Resend", "#22C55E", "n8n"),
   task("integration_n8n", "n8n", "#F29B38", "n8n"),
@@ -100,8 +100,10 @@ export interface Settings {
   hooksInstalled: boolean;
   /** Claude model used by the chat. */
   model: string;
-  /** OpenAI model used by Codex's Mochi. */
+  /** OpenAI model used by Codex's Mochi with an API key. */
   openaiModel: string;
+  /** Codex's Mochi signs in through the Codex CLI (ChatGPT plan) or an API key. */
+  openaiAuth: "codex" | "apiKey";
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -117,6 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hooksInstalled: false,
   model: "claude-opus-5",
   openaiModel: "gpt-6.1-sol",
+  openaiAuth: "codex",
 };
 
 type Listener = () => void;
@@ -226,7 +229,7 @@ class AppState {
     this.notify();
   }
 
-  /** loadIntegrationTasks() — VS Code always on, the rest opt-in (max 4). */
+  /** loadIntegrationTasks() — Claude Code and Codex always on, the rest opt-in (max 4). */
   loadIntegrationTasks() {
     for (const proto of INTEGRATION_AGENTS) {
       const shouldLoad =

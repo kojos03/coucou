@@ -274,7 +274,7 @@ test('a reply that arrives after a file drop reset the chats is discarded', asyn
   assert.equal(input.disabled, false);
 });
 
-test('the OpenAI key and model are configured in their own Settings section', async () => {
+test("Codex's Mochi signs in through Codex by default and can switch to an API key", async () => {
   let stored = false;
   const keys = [], saved = [], tested = [];
   const f = await fixture({
@@ -284,21 +284,108 @@ test('the OpenAI key and model are configured in their own Settings section', as
     chatTestConnection: async (provider, model) => { tested.push([provider, model]); },
   }, true);
   const section = f.page.all().find(el => el.attrs.id === 'openai-api');
+  const select = label => section.all().find(el => el.tag === 'select' && el.attrs['aria-label'] === label);
   assert.match(section.textContent, /Codex's Mochi · OpenAI/);
+  assert.equal(select("How Codex's Mochi signs in").value, 'codex');
+  assert.match(section.textContent, /Codex CLI you're signed in to/);
+  assert.equal(f.button('Test connection', section).disabled, false);
+  await f.button('Test connection', section).fire('click');
+  assert.match(section.textContent, /Codex is signed in/);
+  const keyRow = section.all().find(el => el.className === 'row' && el.textContent.startsWith('API key'));
+  assert.equal(keyRow.style.display, 'none');
+
+  const signIn = select("How Codex's Mochi signs in");
+  signIn.value = 'apiKey';
+  await signIn.fire('change');
+  assert.equal(saved.at(-1).openaiAuth, 'apiKey');
   assert.match(section.textContent, /Add an OpenAI API key/);
+  assert.equal(keyRow.style.display, '');
+  assert.equal(f.button('Test connection', section).disabled, true);
   section.all().find(el => el.tag === 'input').value = 'non-secret-test-value';
   await f.button('Save key', section).fire('click');
   assert.deepEqual(keys, ['openai-api-key']);
   assert.doesNotMatch(f.page.textContent, /non-secret-test-value/);
-  const select = section.all().find(el => el.tag === 'select');
-  assert.equal(select.value, 'gpt-6.1-sol');
-  select.value = 'gpt-6-astra';
-  await select.fire('change');
+  const model = select('OpenAI chat model');
+  assert.equal(model.value, 'gpt-6.1-sol');
+  model.value = 'gpt-6-astra';
+  await model.fire('change');
   assert.equal(saved.at(-1).openaiModel, 'gpt-6-astra');
   assert.equal(saved.at(-1).model, 'claude-opus-5');
   await f.button('Test connection', section).fire('click');
-  assert.deepEqual(tested, [['openai', 'gpt-6-astra']]);
+  assert.deepEqual(tested, [['openai', 'gpt-6.1-sol'], ['openai', 'gpt-6-astra']]);
   f.events.get('settings-section')('openai');
   assert.equal(section.scrolled, true);
   assert.notEqual(f.api().scrolled, true);
+});
+
+test('without a key, Claude\'s Mochi hands the question to Claude Code', async () => {
+  const opened = [];
+  let fail = false;
+  const f = await fixture({
+    chatSend: async () => { throw { code: 'missing_key', message: 'Add an Anthropic key.', settings: true }; },
+    openClaudeCode: async question => { if (fail) throw 'Claude Code was not found.'; opened.push(question); },
+  });
+  const { input, send, error } = chatControls(f);
+  input.value = 'Explain hooks';
+  await send.fire('click');
+  await f.button('Ask in Claude Code').fire('click');
+  assert.deepEqual(opened, ['Explain hooks']);
+  assert.equal(input.value, '');
+  assert.match(error.textContent, /open in Claude Code/);
+  assert.equal(error.hidden, false);
+
+  fail = true;
+  input.value = 'Second question';
+  await send.fire('click');
+  await f.button('Ask in Claude Code').fire('click');
+  assert.match(error.textContent, /Claude Code was not found/);
+  assert.equal(input.value, 'Second question');
+});
+
+test('Codex chat errors never offer the Claude Code hand-off', async () => {
+  const f = await fixture({ chatSend: async () => { throw { code: 'missing_key', message: 'Add an OpenAI key.', settings: true }; } });
+  f.State.loadIntegrationTasks();
+  f.State.setFocus('agent_codex');
+  const { input, send } = chatControls(f);
+  input.value = 'Hello Codex';
+  await send.fire('click');
+  assert.equal(f.button('Ask in Claude Code'), undefined);
+});
+
+test('the Codex hooks section reports, repairs and confirms without writing silently', async () => {
+  const events = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop', 'Stop', 'SessionEnd'];
+  const status = (state = 'ok') => ({
+    path: 'C:/Users/me/.codex/hooks.json', exists: true, problem: null,
+    hookPath: 'C:/coucou-hook.exe', hookReady: true,
+    events: events.map(event => ({ event, state: event === 'Stop' ? state : 'ok' })),
+    installed: state === 'ok', anyInstalled: true, lastEvent: Math.round(Date.now() / 1000) - 120,
+  });
+  let current = status('outdated');
+  const applied = [];
+  let diff = '- old\n+ new\n';
+  const f = await fixture({
+    codexHooksStatus: async () => current,
+    codexHooksPreview: async () => ({ diff, backup: 'C:/hooks.json.bak-coucou-1', settingsPath: 'x', fingerprint: 'abc' }),
+    codexHooksApply: async (install, fingerprint) => { applied.push([install, fingerprint]); current = status('ok'); return 'C:/hooks.json.bak-coucou-1'; },
+  }, true);
+  const section = () => f.page.all().find(el => el.attrs.id === 'codex-hooks');
+  assert.match(section().textContent, /7 of 8 events registered/);
+  assert.match(section().textContent, /Needs repair: Stop/);
+  assert.match(section().textContent, /Last Codex event: 2 min ago/);
+  await f.button('Repair hooks…', section()).fire('click');
+  assert.match(section().textContent, /exactly what will change/);
+  assert.deepEqual(applied, []);
+  await f.button('Back up and write', section()).fire('click');
+  assert.deepEqual(applied, [[true, 'abc']]);
+  assert.match(section().textContent, /run \/hooks and trust them/);
+  await f.button('Back', section()).fire('click');
+  assert.match(section().textContent, /8 of 8 events registered/);
+  assert.equal(f.button('Repair hooks…', section()), undefined);
+
+  diff = 'No change.';
+  current = status('outdated');
+  await f.button('Check again', section()).fire('click');
+  await f.button('Repair hooks…', section()).fire('click');
+  assert.match(section().textContent, /Already up to date/);
+  assert.equal(applied.length, 1);
 });

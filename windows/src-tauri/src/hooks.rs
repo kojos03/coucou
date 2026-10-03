@@ -43,6 +43,8 @@ pub struct HookStatus {
     pub settings_path: String,
     pub hook_path: String,
     pub hook_ready: bool,
+    /// When the relay last delivered a Claude Code event (Unix seconds).
+    pub last_event: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -79,7 +81,7 @@ fn read_settings() -> Result<Value, String> {
 
 /// The parsing half of `read_settings`, split out so it can be tested without a
 /// home directory.
-fn parse_settings(bytes: &[u8], path: &str) -> Result<Value, String> {
+pub(crate) fn parse_settings(bytes: &[u8], path: &str) -> Result<Value, String> {
     // PowerShell writes a UTF-8 BOM with `Set-Content -Encoding utf8`, and
     // serde_json refuses it. Stripping it is safe and well defined; guessing at
     // anything else is not.
@@ -120,7 +122,7 @@ fn hook_command(event: &str) -> String {
 /// `s` as one single-quoted shell word: `'` becomes `'\''`, nothing else is
 /// special inside single quotes.
 #[cfg(unix)]
-fn sh_quote(s: &str) -> String {
+pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
@@ -198,13 +200,13 @@ fn without_ours(existing: &Value) -> Value {
     Value::Object(root)
 }
 
-fn pretty(v: &Value) -> String {
+pub(crate) fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
 
 /// Down to the second: installing then uninstalling in the same minute must not
 /// quietly overwrite the first backup.
-fn stamp() -> String {
+pub(crate) fn stamp() -> String {
     let t = platform::local_time();
     format!(
         "{:04}{:02}{:02}-{:02}{:02}{:02}",
@@ -219,7 +221,7 @@ fn backup_path() -> PathBuf {
 
 /// Identifies the exact bytes a preview was computed from. FNV-1a is plenty:
 /// the question is only "is this still the file I showed the user?".
-fn fingerprint(bytes: &[u8]) -> String {
+pub(crate) fn fingerprint(bytes: &[u8]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
         hash ^= *b as u64;
@@ -256,6 +258,7 @@ pub fn status() -> HookStatus {
         settings_path: settings_path().to_string_lossy().to_string(),
         hook_ready: hook_path.exists(),
         hook_path: hook_path.to_string_lossy().to_string(),
+        last_event: crate::pipe::last_event("claude"),
     }
 }
 
@@ -324,7 +327,7 @@ pub fn write(install: bool, fingerprint: &str) -> Result<String, String> {
 /// On Linux a fresh file would get the umask's 0644, and settings.json can hold
 /// API keys in its `env` block: the new file is created readable by us only,
 /// then given the original's permissions, so the rename never widens them.
-fn write_like(temp: &Path, original: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_like(temp: &Path, original: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -432,7 +435,7 @@ fn install_relay(src: &Path, dest: &Path) {
 // ── Minimal unified diff (LCS) ────────────────────────────────────────────────
 
 /// settings.json is short, so a plain O(n·m) LCS is the simplest honest diff.
-fn unified_diff(before: &str, after: &str) -> String {
+pub(crate) fn unified_diff(before: &str, after: &str) -> String {
     let a: Vec<&str> = before.lines().collect();
     let b: Vec<&str> = after.lines().collect();
     let (n, m) = (a.len(), b.len());

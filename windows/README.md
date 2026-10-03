@@ -21,12 +21,12 @@ The `windows-codex` branch of [kojos03/coucou](https://github.com/kojos03/coucou
 contains the Windows Codex activity and completion work. See the
 [progress report and next phases](../docs/WINDOWS_CODEX_STATUS.md) for completed
 changes, verification results, known limitations, and the collaborator workflow.
-Phase 1 (separate terminal and VS Code actions, chat setup errors, and a
-connection test) is on the `windows-phase1` branch, awaits native Windows
-validation, and is not yet merged into `windows-codex`. The `windows-codex-claude`
-branch builds on it and gives Claude Code and Codex their own Mochi chat:
-Anthropic for Claude's Mochi, OpenAI for Codex's Mochi.
-Codex hook setup is currently manual; each Mochi chat uses its own API key.
+The main working version is the `windows-codex-claude` branch. It builds on
+Phase 1 (`windows-phase1`: separate terminal and VS Code actions, chat setup
+errors, and a connection test) and adds two Mochis — Claude Code and Codex, each
+with its own pill and chat — plus Codex hook setup in Settings. Codex's Mochi can
+run on your ChatGPT plan through the Codex CLI. None of this is merged into
+`windows-codex` yet.
 
 <img src="screenshots/greeting.png" width="640" alt="Mochi waving hello at launch">
 
@@ -81,22 +81,48 @@ in time, Coucou stays quiet and Claude Code asks in the terminal as usual.
 
 It works from any terminal — Windows Terminal, PowerShell, VS Code, Git Bash.
 
+## Codex
+
+Open **Settings… → Codex**. It shows whether `%USERPROFILE%\.codex\hooks.json`
+registers Coucou for every event the island follows, which entries are missing
+or need repair, and when Codex last reached Coucou. **Install hooks…** or
+**Repair hooks…** shows the exact diff and the dated backup first, writes only
+when you click, leaves your own hooks alone, and never rewrites an entry that is
+already correct. After a change, Codex asks you to review the hooks: run `/hooks`
+in Codex and trust them. **Remove hooks…** takes out Coucou's entries only.
+Codex approvals still happen in Codex.
+
 ## Chat and keys
 
-Coucou has two Mochis. The focused pill decides which one you chat with: with
-the **Codex** pill focused, Mochi is Codex pink and answers through **OpenAI**;
-with any other pill, it answers through **Anthropic**. Each Mochi keeps its own
-conversation, and dropping a file starts a new one with both.
+Coucou has two Mochis, shown as the **Claude Code** and **Codex** pills. The
+focused pill decides which one you chat with: with the Codex pill focused, Mochi
+is Codex pink and answers through **OpenAI**; with any other pill, it is white
+and answers through **Anthropic**. Each Mochi keeps its own conversation, and
+dropping a file starts a new one with both.
 
-**Settings… → Claude's Mochi · Anthropic** takes your Anthropic API key and
-**Settings… → Codex's Mochi · OpenAI** takes your OpenAI API key, each with its
-own model. Signing in to Claude Code, Codex or ChatGPT does not set these up.
+**Codex's Mochi** signs in one of two ways (**Settings… → Codex's Mochi ·
+OpenAI**):
+
+- **ChatGPT plan (Codex sign-in)**, the default: Coucou runs the official
+  Codex CLI you are signed in to (`codex exec`), read-only, with hooks off and
+  without adding the chat to your Codex history. Replies count against your
+  plan's Codex usage. Coucou never sees your sign-in. **Test connection** checks
+  `codex login status`.
+- **OpenAI API key**: Coucou calls the OpenAI API with the key and model you
+  choose. Requests set `store: false`; OpenAI's own data retention policy still
+  applies.
+
+**Claude's Mochi** uses an Anthropic API key (**Settings… → Claude's Mochi ·
+Anthropic**). Anthropic does not let apps send chat through a Claude Pro or Max
+sign-in, so without a key the chat offers **Ask in Claude Code**: your question
+opens in the official Claude Code in Windows Terminal, which runs on your own
+Claude plan.
+
 Keys live in the **Windows Credential Manager**, never on disk and never in the
 interface — the island can only ask whether a key exists. Same for every
-integration key. **Test connection** checks that the saved key can see the
+integration key. With a key, **Test connection** checks that it can see the
 selected model without sending a message; it does not check billing or a full
-chat reply. Requests to OpenAI set `store: false`, so replies are not saved for
-later retrieval through the API; OpenAI's own data retention policy still applies.
+chat reply.
 
 No telemetry. The only network requests Coucou makes are to the services you
 configure yourself.

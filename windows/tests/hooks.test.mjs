@@ -231,6 +231,18 @@ test('other external agents keep the folder used by terminal and VS Code actions
   assert.equal(f.task().sessionCwd ?? null, null);
 });
 
+test('Claude Code and Codex keep their own pills while the ticker shows the project', () => {
+  const f = fixture();
+  const claude = () => f.State.tasks.find((task) => task.id === 'integration_claude');
+  assert.equal(claude().name, 'Claude Code');
+  assert.equal(f.task().name, 'Codex');
+  f.listener({ hook_event_name: 'UserPromptSubmit', cwd: 'C:/work/my-app', prompt: 'hi' });
+  assert.equal(claude().name, 'my-app');
+  f.listener({ hook_event_name: 'SessionEnd' });
+  assert.equal(claude().name, 'Claude Code');
+  assert.deepEqual(Array.from(f.State.tasks.slice(0, 2), (task) => task.id), ['integration_claude', 'agent_codex']);
+});
+
 test('pause ignores Codex lifecycle events and immediately declines pending approval', () => {
   const f = fixture();
   f.State.paused = true;

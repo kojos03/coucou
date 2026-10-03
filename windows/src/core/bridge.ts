@@ -73,6 +73,13 @@ export const Bridge = {
   hooksApply: (install: boolean, fingerprint: string) =>
     callOrThrow<string>("hooks_apply", { install, fingerprint }),
 
+  // ── Codex hooks (~/.codex/hooks.json) ─────────────────────────────────────
+  codexHooksStatus: () => call<CodexHookStatus>("codex_hooks_status"),
+  codexHooksPreview: (install: boolean) => callOrThrow<HookPreview>("codex_hooks_preview", { install }),
+  /** Returns the backup path, or "" when there was nothing to back up. */
+  codexHooksApply: (install: boolean, fingerprint: string) =>
+    callOrThrow<string>("codex_hooks_apply", { install, fingerprint }),
+
   approvalDecision: (requestId: string, decision: "allow" | "deny") =>
     call<void>("approval_decision", { requestId, decision }),
   /** "The card is up" — until this lands the relay only waits a moment. */
@@ -88,6 +95,8 @@ export const Bridge = {
   chatReset: () => call<void>("chat_reset"),
   chatTestConnection: (provider: ChatProvider, model: string) =>
     callOrThrow<void>("chat_test_connection", { provider, model }),
+  /** Opens the official Claude Code with the question, on the user's own Claude sign-in. */
+  openClaudeCode: (question: string) => callOrThrow<void>("open_claude_code", { question }),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
@@ -151,6 +160,21 @@ export interface HookStatus {
   settingsPath: string;
   hookPath: string;
   hookReady: boolean;
+  /** Unix seconds of the last Claude Code event since Coucou started. */
+  lastEvent?: number | null;
+}
+
+export interface CodexHookStatus {
+  path: string;
+  exists: boolean;
+  /** Why hooks.json cannot be used as it is (unreadable, invalid JSON…). */
+  problem: string | null;
+  hookPath: string;
+  hookReady: boolean;
+  events: { event: string; state: "ok" | "missing" | "outdated" }[];
+  installed: boolean;
+  anyInstalled: boolean;
+  lastEvent: number | null;
 }
 
 export interface HookPreview {
