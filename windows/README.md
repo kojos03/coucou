@@ -23,8 +23,10 @@ contains the Windows Codex activity and completion work. See the
 changes, verification results, known limitations, and the collaborator workflow.
 Phase 1 (separate terminal and VS Code actions, chat setup errors, and a
 connection test) is on the `windows-phase1` branch, awaits native Windows
-validation, and is not yet merged into `windows-codex`.
-Codex hook setup is currently manual; Mochi chat uses a separate Anthropic API key.
+validation, and is not yet merged into `windows-codex`. The `windows-codex-claude`
+branch builds on it and gives Claude Code and Codex their own Mochi chat:
+Anthropic for Claude's Mochi, OpenAI for Codex's Mochi.
+Codex hook setup is currently manual; each Mochi chat uses its own API key.
 
 <img src="screenshots/greeting.png" width="640" alt="Mochi waving hello at launch">
 
@@ -81,11 +83,20 @@ It works from any terminal — Windows Terminal, PowerShell, VS Code, Git Bash.
 
 ## Chat and keys
 
-**Settings… → Mochi chat · Anthropic** takes your Anthropic API key. Keys live in
-the **Windows Credential Manager**, never on disk and never in the interface — the
-island can only ask whether a key exists. Same for every integration key.
-**Test connection** checks that the saved key can see the selected model without
-sending a message; it does not check billing or a full chat reply.
+Coucou has two Mochis. The focused pill decides which one you chat with: with
+the **Codex** pill focused, Mochi is Codex pink and answers through **OpenAI**;
+with any other pill, it answers through **Anthropic**. Each Mochi keeps its own
+conversation, and dropping a file starts a new one with both.
+
+**Settings… → Claude's Mochi · Anthropic** takes your Anthropic API key and
+**Settings… → Codex's Mochi · OpenAI** takes your OpenAI API key, each with its
+own model. Signing in to Claude Code, Codex or ChatGPT does not set these up.
+Keys live in the **Windows Credential Manager**, never on disk and never in the
+interface — the island can only ask whether a key exists. Same for every
+integration key. **Test connection** checks that the saved key can see the
+selected model without sending a message; it does not check billing or a full
+chat reply. Requests to OpenAI set `store: false`, so replies are not saved for
+later retrieval through the API; OpenAI's own data retention policy still applies.
 
 No telemetry. The only network requests Coucou makes are to the services you
 configure yourself.

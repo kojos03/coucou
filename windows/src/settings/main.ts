@@ -3,8 +3,8 @@
 // integrations land here too in a later stage.
 
 import "./settings.css";
-import { Bridge, chatFailure, onEvent, type HookStatus } from "../core/bridge";
-import { DEFAULT_SETTINGS, type Settings } from "../core/state";
+import { Bridge, chatFailure, onEvent, type HookStatus, type SettingsSection } from "../core/bridge";
+import { DEFAULT_SETTINGS, type ChatProvider, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
@@ -171,26 +171,74 @@ function claudeSection(status: HookStatus): HTMLElement {
   return section;
 }
 
-// ── Claude API section ────────────────────────────────────────────────────────
+// ── Chat sections: Claude's Mochi (Anthropic) and Codex's Mochi (OpenAI) ──────
 
-const MODELS: [string, string][] = [
-  ["claude-opus-5", "Claude Opus 5"],
-  ["claude-sonnet-5", "Claude Sonnet 5"],
-  ["claude-haiku-4-5", "Claude Haiku 4.5"],
-];
+interface ChatSectionConfig {
+  id: string;
+  /** What `open_settings_window` sends to scroll here. */
+  target: SettingsSection;
+  provider: ChatProvider;
+  vendor: string;
+  keyName: string;
+  title: string;
+  about: string;
+  missing: string;
+  placeholder: string;
+  models: [string, string][];
+  setting: "model" | "openaiModel";
+  console: [string, string];
+}
 
-function apiSection(): HTMLElement {
+const CLAUDE_CHAT: ChatSectionConfig = {
+  id: "claude-api",
+  target: "claude",
+  provider: "anthropic",
+  vendor: "Anthropic",
+  keyName: "anthropic-api-key",
+  title: "Claude's Mochi · Anthropic",
+  about: "Answers when you chat while the Claude Code pill, or any pill other than Codex, is focused. It uses a separate Anthropic API key: signing into Claude Code or Codex does not configure it. Keys are stored in the operating system's credential store.",
+  missing: "Add an Anthropic API key to chat with Claude's Mochi.",
+  placeholder: "sk-ant-...",
+  models: [
+    ["claude-opus-5", "Claude Opus 5"],
+    ["claude-sonnet-5", "Claude Sonnet 5"],
+    ["claude-haiku-4-5", "Claude Haiku 4.5"],
+  ],
+  setting: "model",
+  console: ["Anthropic Console", "https://console.anthropic.com/"],
+};
+
+const CODEX_CHAT: ChatSectionConfig = {
+  id: "openai-api",
+  target: "openai",
+  provider: "openai",
+  vendor: "OpenAI",
+  keyName: "openai-api-key",
+  title: "Codex's Mochi · OpenAI",
+  about: "Answers when you chat while the Codex pill is focused. It uses a separate OpenAI API key: signing into Codex or ChatGPT does not configure it. Keys are stored in the operating system's credential store.",
+  missing: "Add an OpenAI API key to chat with Codex's Mochi.",
+  placeholder: "sk-...",
+  models: [
+    ["gpt-6.1-sol", "GPT-6.1 Sol"],
+    ["gpt-6-astra", "GPT-6 Astra"],
+    ["gpt-6-luna", "GPT-6 Luna"],
+  ],
+  setting: "openaiModel",
+  console: ["OpenAI dashboard", "https://platform.openai.com/api-keys"],
+};
+
+function chatSection(cfg: ChatSectionConfig): { el: HTMLElement; reveal(): void } {
   const dot = statusDot(false);
   const state = h("span", { class: "hint", text: "Checking the credential store…" });
   const field = h("input", {
-    type: "password", placeholder: "sk-ant-...", "aria-label": "Anthropic API key",
+    type: "password", placeholder: cfg.placeholder, "aria-label": `${cfg.vendor} API key`,
     style: "flex:1 1 auto;min-width:0", autocomplete: "off", spellcheck: "false",
   });
   const saveBtn = h("button", { class: "primary", text: "Save key" });
   const clearBtn = h("button", { class: "danger", text: "Remove", hidden: true });
   const testBtn = h("button", { text: "Test connection", disabled: true });
   const feedback = h("div", { role: "status", "aria-live": "polite" });
-  const model = h("select", { "aria-label": "Chat model" });
+  const model = h("select", { "aria-label": `${cfg.vendor} chat model` });
   let busy = false;
   let present = false;
 
@@ -207,10 +255,10 @@ function apiSection(): HTMLElement {
 
   async function refresh() {
     try {
-      present = await Bridge.secretPresent("anthropic-api-key");
+      present = await Bridge.secretPresent(cfg.keyName);
       dot.style.background = present ? "#22c55e" : "#f4505e";
-      state.textContent = present ? "API key saved securely." : "Add an Anthropic API key to use Mochi chat.";
-      field.placeholder = present ? "••••••••••••  (stored)" : "sk-ant-...";
+      state.textContent = present ? "API key saved securely." : cfg.missing;
+      field.placeholder = present ? "••••••••••••  (stored)" : cfg.placeholder;
       clearBtn.hidden = !present;
       testBtn.disabled = busy || !present;
       return true;
@@ -227,11 +275,11 @@ function apiSection(): HTMLElement {
   saveBtn.addEventListener("click", async () => {
     if (busy) return;
     const value = field.value.trim();
-    if (!value) { notice("Paste an Anthropic API key before saving."); return; }
+    if (!value) { notice(`Paste an ${cfg.vendor} API key before saving.`); return; }
     clear(feedback);
     setBusy(true);
     try {
-      await Bridge.secretSet("anthropic-api-key", value);
+      await Bridge.secretSet(cfg.keyName, value);
       if (await refresh()) notice("Key saved securely. You can now test the connection.", true);
     } catch (error) {
       notice(chatFailure(error).message);
@@ -246,7 +294,7 @@ function apiSection(): HTMLElement {
     setBusy(true);
     clear(feedback);
     try {
-      await Bridge.secretClear("anthropic-api-key");
+      await Bridge.secretClear(cfg.keyName);
       field.value = "";
       if (await refresh()) notice("Key removed.", true);
     } catch (error) {
@@ -263,7 +311,7 @@ function apiSection(): HTMLElement {
     testBtn.textContent = "Testing…";
     clear(feedback);
     try {
-      await Bridge.chatTestConnection(model.value);
+      await Bridge.chatTestConnection(cfg.provider, model.value);
       notice("Connected. The saved key can access this model. No chat message was sent; billing and message generation are not tested.", true);
     } catch (error) {
       notice(chatFailure(error).message);
@@ -273,38 +321,39 @@ function apiSection(): HTMLElement {
     }
   });
 
-  for (const [id, label] of MODELS) model.append(h("option", { value: id, text: label }));
-  if (!MODELS.some(([id]) => id === settings.model)) {
-    model.append(h("option", { value: settings.model, text: settings.model }));
+  for (const [id, label] of cfg.models) model.append(h("option", { value: id, text: label }));
+  if (!cfg.models.some(([id]) => id === settings[cfg.setting])) {
+    model.append(h("option", { value: settings[cfg.setting], text: settings[cfg.setting] }));
   }
-  model.value = settings.model;
+  model.value = settings[cfg.setting];
   model.addEventListener("change", () => {
-    settings.model = model.value;
+    settings[cfg.setting] = model.value;
     clear(feedback);
     void save();
   });
 
-  const section = h(
-    "section", { id: "claude-api" },
-    h("h2", {}, dot, h("span", { text: "Mochi chat · Anthropic" })),
-    h("div", { class: "hint", text: "Chat uses a separate Anthropic API key. Signing into Codex does not configure it. Keys are stored in the operating system's credential store." }),
+  const el = h(
+    "section", { id: cfg.id },
+    h("h2", {}, dot, h("span", { text: cfg.title })),
+    h("div", { class: "hint", text: cfg.about }),
     state,
     h("div", { class: "row" }, h("label", { text: "API key" }), field, saveBtn, clearBtn),
     h("div", { class: "row" }, h("label", { text: "Model" }), model),
     h("div", { class: "row" }, testBtn, h("button", {
-      text: "Anthropic Console", onclick: () => void Bridge.openUrl("https://console.anthropic.com/"),
+      text: cfg.console[0], onclick: () => void Bridge.openUrl(cfg.console[1]),
     })),
     h("div", { class: "hint", text: "Test connection checks the saved key and selected model without sending a chat message." }),
     feedback,
   );
   void refresh();
-  void onEvent<string>("settings-section", (target) => {
-    if (target !== "claude") return;
-    section.scrollIntoView({ block: "start" });
-    field.focus({ preventScroll: true });
-    void refresh();
-  });
-  return section;
+  return {
+    el,
+    reveal() {
+      el.scrollIntoView({ block: "start" });
+      field.focus({ preventScroll: true });
+      void refresh();
+    },
+  };
 }
 
 // ── Integrations section ──────────────────────────────────────────────────────
@@ -489,11 +538,12 @@ async function main() {
   const present: Record<string, boolean> = {};
   for (const k of keys) present[k] = await Bridge.secretPresent(k).catch(() => false);
 
+  const chats = [chatSection(CLAUDE_CHAT), chatSection(CODEX_CHAT)];
   clear(root);
   root.append(
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
     claudeSection(status),
-    apiSection(),
+    ...chats.map((chat) => chat.el),
     integrationsSection(present),
     generalSection(),
     h("div", {
@@ -501,6 +551,12 @@ async function main() {
       text: "No telemetry. Network requests only go to the services you configure yourself.",
     }),
   );
+
+  // "Chat settings" in the island scrolls to the section of the Mochi that failed.
+  const targets = [CLAUDE_CHAT, CODEX_CHAT];
+  void onEvent<SettingsSection>("settings-section", (target) => {
+    chats[targets.findIndex((cfg) => cfg.target === target)]?.reveal();
+  });
 
   void onEvent<Settings>("settings-changed", (s) => {
     settings = { ...settings, ...s };

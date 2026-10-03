@@ -3,9 +3,9 @@
 
 import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
-import { Bridge, chatFailure, type ChatContext } from "../core/bridge";
+import { Bridge, chatFailure, settingsSectionFor, type ChatContext } from "../core/bridge";
 import { Sound } from "../core/sound";
-import { State, type ChatMessage } from "../core/state";
+import { State, type ChatMessage, type ChatProvider } from "../core/state";
 import type { ViewHost } from "./views";
 
 let nextId = 1;
@@ -57,52 +57,73 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
   let sending = false;
-  let renderedCount = -1;
+  /** The pending reply and the error on show each belong to one Mochi. */
+  let pendingFor: ChatProvider | null = null;
+  let errorFor: ChatProvider | null = null;
+  let renderedKey = "";
+
+  function showError(provider: ChatProvider, err: unknown) {
+    const failure = chatFailure(err);
+    const actions = h("div", { class: "actions" });
+    if (failure.settings) {
+      actions.append(h("button", {
+        class: "btn secondary", text: "Chat settings",
+        onclick: () => void Bridge.openSettingsWindow(settingsSectionFor(provider)),
+      }));
+    }
+    actions.append(h("button", { class: "btn secondary", text: "Retry", onclick: () => void submit() }));
+    clear(errorBox);
+    errorBox.append(h("div", { text: failure.message }), actions);
+    errorFor = provider;
+  }
 
   async function submit() {
     const query = input.value.trim();
     if (!query || sending) return;
+    // The Mochi on screen answers: Codex's through OpenAI, the others through Anthropic.
+    const provider = State.chatProvider;
+    const history = State.chatHistories[provider];
     input.value = "";
-    errorBox.hidden = true;
+    errorFor = null;
     clear(errorBox);
     sending = true;
+    pendingFor = provider;
     Sound.play("send");
 
     const message: ChatMessage = { id: nextId++, role: "user", content: query };
-    State.chatHistory.push(message);
+    history.push(message);
     State.stateOverride = "thinking";
     State.notify();
     onHeightChange();
 
     const file = State.droppedFile;
     const context: ChatContext | null =
-      State.chatHistory.length === 1 && file ? { kind: "file", name: file.name, path: file.path } : null;
+      history.length === 1 && file ? { kind: "file", name: file.name, path: file.path } : null;
+    // A file dropped meanwhile starts new conversations; this turn's reply or
+    // error then belongs to one that no longer exists.
+    const current = () => State.chatHistories[provider] === history;
 
     try {
-      const reply = await Bridge.chatSend(query, context);
-      State.chatHistory.push({ id: nextId++, role: "assistant", content: reply.text });
+      const reply = await Bridge.chatSend(provider, query, context);
       State.stateOverride = null;
-      Sound.play("finish");
+      if (current()) {
+        history.push({ id: nextId++, role: "assistant", content: reply.text });
+        Sound.play("finish");
+      }
     } catch (err) {
       State.stateOverride = null;
-      // The backend rolls back failed turns too. Preserve the draft and first-file
-      // context so a setup error does not lose the user's question or attachment.
-      State.chatHistory = State.chatHistory.filter((entry) => entry.id !== message.id);
-      input.value = query;
-      const failure = chatFailure(err);
-      const actions = h("div", { class: "actions" });
-      if (failure.settings) {
-        actions.append(h("button", {
-          class: "btn secondary", text: "Chat settings",
-          onclick: () => void Bridge.openSettingsWindow("claude"),
-        }));
+      if (current()) {
+        // The backend rolls back failed turns too. Preserve the draft and first-file
+        // context so a setup error does not lose the user's question or attachment.
+        const index = history.indexOf(message);
+        if (index >= 0) history.splice(index, 1);
+        input.value = query;
+        showError(provider, err);
+        Sound.play("error");
       }
-      actions.append(h("button", { class: "btn secondary", text: "Retry", onclick: () => void submit() }));
-      errorBox.append(h("div", { text: failure.message }), actions);
-      errorBox.hidden = false;
-      Sound.play("error");
     } finally {
       sending = false;
+      pendingFor = null;
       State.notify();
       onHeightChange();
       input.focus();
@@ -129,17 +150,23 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         if (wantChip) chipRow.append(contextChip(wantChip));
       }
 
-      const thinking = State.stateOverride === "thinking";
-      const count = State.chatHistory.length + (thinking ? 0.5 : 0);
-      if (count !== renderedCount) {
-        renderedCount = count;
+      // Switching pills swaps the conversation along with the Mochi.
+      const provider = State.chatProvider;
+      const history = State.chatHistories[provider];
+      const thinking = pendingFor === provider;
+      const key = `${provider}:${history.length}:${thinking}`;
+      if (key !== renderedKey) {
+        renderedKey = key;
         clear(log);
-        for (const m of State.chatHistory) log.append(bubble(m));
+        for (const m of history) log.append(bubble(m));
         if (thinking) log.append(typingDots());
         log.scrollTop = log.scrollHeight;
       }
+      errorBox.hidden = errorFor !== provider;
 
-      input.placeholder = State.chatHistory.length === 0 ? "Ask me anything…" : "Continue…";
+      // Codex's Mochi names the service that answers; Claude's keeps its wording.
+      const service = provider === "openai" ? " (OpenAI)" : "";
+      input.placeholder = (history.length === 0 ? "Ask me anything…" : "Continue…") + service;
       input.disabled = sending;
       send.disabled = sending;
     },

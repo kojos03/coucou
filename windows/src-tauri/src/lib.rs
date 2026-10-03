@@ -7,6 +7,7 @@ mod integrations;
 mod island;
 mod launch;
 mod log;
+mod openai;
 mod pipe;
 mod platform;
 mod secrets;
@@ -16,7 +17,7 @@ mod tray;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
@@ -210,26 +211,54 @@ fn approval_decline(app: AppHandle, request_id: String) {
 
 // ── Chat, files and secrets ───────────────────────────────────────────────────
 
+/// Which Mochi is chatting: Codex's answers through OpenAI, every other pill's
+/// through Anthropic. The island picks it from the focused pill.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ChatProvider {
+    Anthropic,
+    Openai,
+}
+
+/// One conversation per Mochi, so switching pills never mixes the two histories.
+#[derive(Default)]
+struct Chats {
+    anthropic: Chat,
+    openai: Chat,
+}
+
 /// One chat turn. The API key and any file bytes stay on the Rust side.
 #[tauri::command]
 async fn chat_send(
     shared: State<'_, Shared>,
-    chat: State<'_, Chat>,
+    chats: State<'_, Chats>,
+    provider: ChatProvider,
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, ChatError> {
-    let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
+    let (model, openai_model) = {
+        let settings = shared.settings.lock().unwrap();
+        (settings.model.clone(), settings.openai_model.clone())
+    };
+    match provider {
+        ChatProvider::Anthropic => claude::send(&chats.anthropic, &model, query, context).await,
+        ChatProvider::Openai => openai::send(&chats.openai, &openai_model, query, context).await,
+    }
+}
+
+/// A dropped file starts a new conversation with both Mochis.
+#[tauri::command]
+fn chat_reset(chats: State<Chats>) {
+    chats.anthropic.reset();
+    chats.openai.reset();
 }
 
 #[tauri::command]
-fn chat_reset(chat: State<Chat>) {
-    chat.reset();
-}
-
-#[tauri::command]
-async fn chat_test_connection(model: String) -> Result<(), ChatError> {
-    claude::test_connection(&model).await
+async fn chat_test_connection(provider: ChatProvider, model: String) -> Result<(), ChatError> {
+    match provider {
+        ChatProvider::Anthropic => claude::test_connection(&model).await,
+        ChatProvider::Openai => openai::test_connection(&model).await,
+    }
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -338,8 +367,8 @@ pub fn show_settings_window(app: &AppHandle) {
 #[tauri::command]
 fn open_settings_window(app: AppHandle, section: Option<String>) {
     show_settings_window(&app);
-    if section.as_deref() == Some("claude") {
-        let _ = app.emit_to("settings", "settings-section", "claude");
+    if let Some(target @ ("claude" | "openai")) = section.as_deref() {
+        let _ = app.emit_to("settings", "settings-section", target);
     }
 }
 
@@ -358,7 +387,7 @@ pub fn run() {
             gate: gate.clone(),
         })
         .manage(Pending::default())
-        .manage(Chat::default())
+        .manage(Chats::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,

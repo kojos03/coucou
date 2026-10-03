@@ -4,6 +4,7 @@
 // Everything happens here rather than in the island: the API key never leaves
 // the Credential Manager, and file bytes never cross the IPC boundary.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -18,40 +19,56 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 const MAX_TOKENS: u32 = 4096;
 /// Text and code files are inlined; anything larger is skipped, as on macOS.
-const MAX_INLINE_TEXT: u64 = 200_000;
+pub(crate) const MAX_INLINE_TEXT: u64 = 200_000;
 
 pub const DEFAULT_MODEL: &str = "claude-opus-5";
 
-const SYSTEM_PROMPT: &str = "You are Mochi, a personal AI assistant living at the top of the user's screen. \
+pub(crate) const SYSTEM_PROMPT: &str = "You are Mochi, a personal AI assistant living at the top of the user's screen. \
 You have web search access and can help with absolutely anything — research, coding, finding places, recommendations, tasks, questions. \
 Respond in the user's language. Be thorough and complete — use as much detail as the task requires. \
 No markdown formatting (no **, no ##, no bullet dashes). Use plain text with line breaks.";
 
+/// One conversation, in the provider's own message format.
 #[derive(Default)]
 pub struct Chat {
     /// Full multi-turn history, including tool_use / tool_result blocks.
     messages: Mutex<Vec<Value>>,
+    /// Bumped by `reset`. A reply that lands after a reset (a file dropped while
+    /// Mochi was answering) must not become the first turn of the new conversation.
+    generation: AtomicU64,
 }
 
 impl Chat {
     pub fn reset(&self) {
-        self.messages.lock().unwrap().clear();
+        let mut messages = self.messages.lock().unwrap();
+        messages.clear();
+        self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.messages.lock().unwrap().is_empty()
     }
 
-    fn push(&self, message: Value) {
-        self.messages.lock().unwrap().push(message);
+    /// Adds the user's turn; returns the conversation to send and its generation.
+    pub(crate) fn begin(&self, message: Value) -> (u64, Vec<Value>) {
+        let mut messages = self.messages.lock().unwrap();
+        messages.push(message);
+        (self.generation.load(Ordering::SeqCst), messages.clone())
     }
 
-    fn pop(&self) {
-        self.messages.lock().unwrap().pop();
-    }
-
-    fn snapshot(&self) -> Vec<Value> {
-        self.messages.lock().unwrap().clone()
+    /// Commits the reply, or takes the user's turn back on failure — unless the
+    /// conversation was reset in the meantime, in which case nothing is touched.
+    pub(crate) fn finish(&self, generation: u64, reply: Option<Value>) {
+        let mut messages = self.messages.lock().unwrap();
+        if self.generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        match reply {
+            Some(reply) => messages.push(reply),
+            None => {
+                messages.pop();
+            }
+        }
     }
 }
 
@@ -77,7 +94,7 @@ pub struct ChatError {
 }
 
 impl ChatError {
-    fn new(code: &'static str, message: impl Into<String>, settings: bool) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>, settings: bool) -> Self {
         Self { code, message: message.into(), settings }
     }
 }
@@ -87,7 +104,7 @@ fn api_key() -> Result<String, ChatError> {
         .map_err(|message| ChatError::new("credential_store", message, true))?
         .ok_or_else(|| ChatError::new(
             "missing_key",
-            "Mochi chat needs an Anthropic API key. Add one in Chat settings. Your Codex sign-in does not set up this separate chat.",
+            "Claude's Mochi needs an Anthropic API key. Add one in Claude's Mochi settings. Your Claude Code or Codex sign-in does not set up this chat.",
             true,
         ))
 }
@@ -96,7 +113,7 @@ fn api_key() -> Result<String, ChatError> {
 pub async fn test_connection(model: &str) -> Result<(), ChatError> {
     let key = api_key()?;
     if model.is_empty() {
-        return Err(ChatError::new("model", "Choose a model in Chat settings.", true));
+        return Err(ChatError::new("model", "Choose a model in Claude's Mochi settings.", true));
     }
     let mut url = reqwest::Url::parse("https://api.anthropic.com/v1/models/").unwrap();
     url.path_segments_mut().unwrap().pop_if_empty().push(model);
@@ -143,7 +160,7 @@ pub async fn send(
     }
     content.push(json!({ "type": "text", "text": query }));
 
-    chat.push(json!({ "role": "user", "content": content }));
+    let (generation, messages) = chat.begin(json!({ "role": "user", "content": content }));
 
     let body = json!({
         "model": model,
@@ -151,25 +168,25 @@ pub async fn send(
         "system": SYSTEM_PROMPT,
         "tools": [{ "type": "web_search_20260209", "name": "web_search", "max_uses": 5 }],
         "fallbacks": "default",
-        "messages": chat.snapshot(),
+        "messages": messages,
     });
 
     let response = match call(&key, &body).await {
         Ok(v) => v,
         Err(err) => {
-            chat.pop(); // keep the history consistent with what the model saw
+            chat.finish(generation, None); // keep the history consistent with what the model saw
             return Err(err);
         }
     };
 
     // A policy decline comes back as HTTP 200 with stop_reason "refusal".
     if response.get("stop_reason").and_then(Value::as_str) == Some("refusal") {
-        chat.pop();
+        chat.finish(generation, None);
         return Err(ChatError::new("refusal", "Claude declined this request. Try rephrasing it.", false));
     }
 
     let Some(blocks) = response.get("content").and_then(Value::as_array).cloned() else {
-        chat.pop();
+        chat.finish(generation, None);
         return Err(ChatError::new("response", "Anthropic returned an unexpected response. Try again.", false));
     };
 
@@ -183,15 +200,15 @@ pub async fn send(
         .to_string();
 
     if text.is_empty() {
-        chat.pop();
+        chat.finish(generation, None);
         return Err(ChatError::new("response", "Claude returned no text. Try again.", false));
     }
     // Commit a successful turn only after there is text to show in the UI.
-    chat.push(json!({ "role": "assistant", "content": blocks }));
+    chat.finish(generation, Some(json!({ "role": "assistant", "content": blocks })));
     Ok(ChatReply { text })
 }
 
-fn client(timeout: u64) -> Result<reqwest::Client, ChatError> {
+pub(crate) fn client(timeout: u64) -> Result<reqwest::Client, ChatError> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout))
         .redirect(reqwest::redirect::Policy::none())
@@ -222,16 +239,16 @@ fn api_error(status: u16, body: &str) -> ChatError {
     let value: Value = serde_json::from_str(body).unwrap_or(Value::Null);
     let detail = value["error"]["message"].as_str().unwrap_or("").to_lowercase();
     match status {
-        401 => ChatError::new("authentication", "Anthropic rejected the saved API key. Replace it in Chat settings.", true),
+        401 => ChatError::new("authentication", "Anthropic rejected the saved API key. Replace it in Claude's Mochi settings.", true),
         403 => ChatError::new("permission", "This API key does not have access to the requested resource. Check its workspace and permissions.", true),
-        404 => ChatError::new("model", "The selected model is unavailable for this API key. Choose another model in Chat settings.", true),
+        404 => ChatError::new("model", "The selected model is unavailable for this API key. Choose another model in Claude's Mochi settings.", true),
         400 | 402 if detail.contains("credit") || detail.contains("billing") || status == 402 =>
             ChatError::new("billing", "The Anthropic account needs API credits or a billing update. Check billing in the Anthropic Console.", true),
         400 => ChatError::new("request", "Anthropic could not accept this request. Check the selected model or try a shorter message.", true),
         413 => ChatError::new("request_size", "This request is too large. Try a smaller file or start a shorter conversation.", false),
         429 => ChatError::new("rate_limit", "Anthropic's rate limit was reached. Wait a moment and try again.", false),
         500..=599 => ChatError::new("service", "Anthropic is temporarily unavailable. Try again later.", false),
-        _ => ChatError::new("api", format!("Anthropic returned HTTP {status}. Try again or check Chat settings."), true),
+        _ => ChatError::new("api", format!("Anthropic returned HTTP {status}. Try again or check Claude's Mochi settings."), true),
     }
 }
 
@@ -342,6 +359,31 @@ mod tests {
             assert_eq!(error.code, expected);
             assert!(!error.message.contains("sensitive-sentinel"));
         }
+    }
+
+    #[test]
+    fn a_reply_after_a_reset_never_joins_the_new_conversation() {
+        let chat = Chat::default();
+        let (generation, sent) = chat.begin(json!("first question"));
+        assert_eq!(sent.len(), 1);
+        chat.finish(generation, Some(json!("first answer")));
+        assert_eq!(chat.messages.lock().unwrap().len(), 2);
+
+        let (generation, _) = chat.begin(json!("failed question"));
+        chat.finish(generation, None);
+        assert_eq!(chat.messages.lock().unwrap().len(), 2);
+
+        let (generation, _) = chat.begin(json!("late question"));
+        chat.reset();
+        chat.finish(generation, Some(json!("late answer")));
+        assert!(chat.is_empty());
+        let (generation, _) = chat.begin(json!("late failure"));
+        chat.reset();
+        let (fresh, _) = chat.begin(json!("new question"));
+        chat.finish(generation, None);
+        assert_eq!(chat.messages.lock().unwrap().len(), 1);
+        chat.finish(fresh, Some(json!("new answer")));
+        assert_eq!(chat.messages.lock().unwrap().len(), 2);
     }
 
     #[test]

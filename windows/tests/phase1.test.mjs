@@ -120,8 +120,9 @@ test('missing chat key preserves the question and attachment through setup and r
   await f.button('Retry').fire('click');
   assert.equal(f.State.chatHistory.length, 2);
   assert.equal(f.State.chatHistory[1].content, 'Done');
-  assert.equal(calls[0][1].path, 'C:/sample.txt');
-  assert.equal(calls[1][1].path, 'C:/sample.txt');
+  assert.deepEqual(calls.map(call => call[0]), ['anthropic', 'anthropic']);
+  assert.equal(calls[0][2].path, 'C:/sample.txt');
+  assert.equal(calls[1][2].path, 'C:/sample.txt');
   assert.equal(f.page.all().find(el => el.className === 'chat-error').hidden, true);
 });
 
@@ -195,7 +196,7 @@ test('connection test uses the selected model and requires unsaved keys to be sa
   const models = [];
   const f = await fixture({
     secretPresent: async key => key === 'anthropic-api-key',
-    chatTestConnection: async model => { models.push(model); },
+    chatTestConnection: async (provider, model) => { models.push([provider, model]); },
   }, true);
   f.api().all().find(el => el.tag === 'select').value = 'claude-sonnet-5';
   const field = f.api().all().find(el => el.tag === 'input');
@@ -205,6 +206,99 @@ test('connection test uses the selected model and requires unsaved keys to be sa
   assert.match(f.api().textContent, /Save the new key before testing/);
   field.value = '';
   await f.button('Test connection').fire('click');
-  assert.deepEqual(models, ['claude-sonnet-5']);
+  assert.deepEqual(models, [['anthropic', 'claude-sonnet-5']]);
   assert.match(f.api().textContent, /No chat message was sent/);
+});
+
+// ── Two Mochis: Codex's chats through OpenAI, the others through Anthropic ─────
+
+const chatControls = f => ({
+  input: f.page.all().find(el => el.tag === 'input'),
+  send: f.page.all().find(el => el.className === 'send-btn'),
+  error: f.page.all().find(el => el.className === 'chat-error'),
+});
+
+test('Codex and Claude Mochis keep separate conversations and providers', async () => {
+  const calls = [];
+  const f = await fixture({ chatSend: async (provider, query) => { calls.push([provider, query]); return { text: `${provider} reply` }; } });
+  f.State.loadIntegrationTasks();
+  const { input, send } = chatControls(f);
+  f.State.setFocus('integration_claude');
+  assert.doesNotMatch(input.placeholder, /OpenAI/);
+  input.value = 'Hello Claude';
+  await send.fire('click');
+  f.State.setFocus('agent_codex');
+  assert.doesNotMatch(f.page.textContent, /Hello Claude/);
+  assert.match(input.placeholder, /OpenAI/);
+  input.value = 'Hello Codex';
+  await send.fire('click');
+  assert.deepEqual(calls, [['anthropic', 'Hello Claude'], ['openai', 'Hello Codex']]);
+  assert.deepEqual(Array.from(f.State.chatHistories.openai, m => m.content), ['Hello Codex', 'openai reply']);
+  assert.match(f.page.textContent, /openai reply/);
+  f.State.setFocus('integration_claude');
+  assert.match(f.page.textContent, /anthropic reply/);
+  assert.doesNotMatch(f.page.textContent, /Hello Codex/);
+});
+
+test('Codex chat setup errors open the OpenAI settings and stay with Codex', async () => {
+  const sections = [];
+  const f = await fixture({
+    chatSend: async () => { throw { code: 'missing_key', message: 'Add an OpenAI key.', settings: true }; },
+    openSettingsWindow: section => { sections.push(section); },
+  });
+  f.State.loadIntegrationTasks();
+  f.State.setFocus('agent_codex');
+  const { input, send, error } = chatControls(f);
+  input.value = 'Hello Codex';
+  await send.fire('click');
+  assert.equal(error.hidden, false);
+  await f.button('Chat settings').fire('click');
+  assert.deepEqual(sections, ['openai']);
+  f.State.setFocus('integration_claude');
+  assert.equal(error.hidden, true);
+  f.State.setFocus('agent_codex');
+  assert.equal(error.hidden, false);
+});
+
+test('a reply that arrives after a file drop reset the chats is discarded', async () => {
+  let resolveReply;
+  const f = await fixture({ chatSend: () => new Promise(resolve => { resolveReply = resolve; }) });
+  const { input, send } = chatControls(f);
+  input.value = 'Old question';
+  await send.fire('click');
+  f.State.resetChats();
+  resolveReply({ text: 'Late answer' });
+  await new Promise(setImmediate);
+  assert.equal(f.State.chatHistory.length, 0);
+  assert.doesNotMatch(f.page.textContent, /Late answer|Old question/);
+  assert.equal(input.disabled, false);
+});
+
+test('the OpenAI key and model are configured in their own Settings section', async () => {
+  let stored = false;
+  const keys = [], saved = [], tested = [];
+  const f = await fixture({
+    secretPresent: async key => key === 'openai-api-key' && stored,
+    secretSet: async key => { keys.push(key); stored = true; },
+    saveSettings: async settings => { saved.push({ ...settings }); },
+    chatTestConnection: async (provider, model) => { tested.push([provider, model]); },
+  }, true);
+  const section = f.page.all().find(el => el.attrs.id === 'openai-api');
+  assert.match(section.textContent, /Codex's Mochi · OpenAI/);
+  assert.match(section.textContent, /Add an OpenAI API key/);
+  section.all().find(el => el.tag === 'input').value = 'non-secret-test-value';
+  await f.button('Save key', section).fire('click');
+  assert.deepEqual(keys, ['openai-api-key']);
+  assert.doesNotMatch(f.page.textContent, /non-secret-test-value/);
+  const select = section.all().find(el => el.tag === 'select');
+  assert.equal(select.value, 'gpt-6.1-sol');
+  select.value = 'gpt-6-astra';
+  await select.fire('change');
+  assert.equal(saved.at(-1).openaiModel, 'gpt-6-astra');
+  assert.equal(saved.at(-1).model, 'claude-opus-5');
+  await f.button('Test connection', section).fire('click');
+  assert.deepEqual(tested, [['openai', 'gpt-6-astra']]);
+  f.events.get('settings-section')('openai');
+  assert.equal(section.scrolled, true);
+  assert.notEqual(f.api().scrolled, true);
 });

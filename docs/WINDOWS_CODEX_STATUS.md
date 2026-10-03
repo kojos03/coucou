@@ -1,7 +1,7 @@
 # Windows Codex integration: progress and next phases
 
 Last updated: 3 October 2026, after the Phase 1 review at the handover from
-Codex to Claude Code.
+Codex to Claude Code and the two-Mochi chat work.
 
 This is the engineering handoff for Konstantinos and Zack on the
 [kojos03/coucou fork](https://github.com/kojos03/coucou). The Windows work is
@@ -12,14 +12,17 @@ development.
 |---|---|---|
 | `windows-codex` | [ee6176f — Fix Windows Codex activity and completion lifecycle](https://github.com/kojos03/coucou/commit/ee6176f7c42103de18d298d3a90969097204665f) | Pushed; integration baseline |
 | `windows-codex-documentation` | [2967bb8 — Document Windows Codex progress and next phases](https://github.com/kojos03/coucou/commit/2967bb80ad60e8e7dbeb6d64ebad011ecb4ec047), on top of `ee6176f` | Pushed |
-| `windows-phase1` | [3a8f2cd — Fix Windows launch actions and Mochi chat setup](https://github.com/kojos03/coucou/commit/3a8f2cdea98b3e1d9cc50349b6a94e9dd9ac6b50), on top of `2967bb8` | Pushed; not merged into `windows-codex` or `main` |
+| `windows-phase1` | [3a8f2cd — Fix Windows launch actions and Mochi chat setup](https://github.com/kojos03/coucou/commit/3a8f2cdea98b3e1d9cc50349b6a94e9dd9ac6b50) and `c95d7ee` (review fix and this note), on top of `2967bb8` | Pushed; not merged into `windows-codex` or `main` |
+| `windows-codex-claude` | Two Mochi chats, Anthropic and OpenAI (section 7), on top of `windows-phase1` | Pushed; not merged |
 
 **Current status:** Codex activity and completion work in the tested Windows
 setup. Phase 1 is implemented on `windows-phase1`, and its automated frontend
 checks pass. Its native behavior has not been exercised in the running app for
 the current commit: launching Windows Terminal, PowerShell and VS Code, the
-Credential Manager, and live Anthropic errors. Phases 2–4 are proposed work,
-not implemented features.
+Credential Manager, and live Anthropic errors. The two-Mochi chat on
+`windows-codex-claude` passes its automated checks on Windows but has not made
+a real Anthropic or OpenAI request. Phases 2–4 are proposed work, not
+implemented features.
 
 ## What has been completed
 
@@ -182,7 +185,8 @@ testing:
    file while a reply is pending resets the conversation. The late reply is then
    stored as the first message of the new conversation, so the Rust history
    starts with an assistant turn, the next request can fail, and the new file is
-   not attached. A conversation generation check in `claude.rs` would prevent it.
+   not attached. **Fixed on `windows-codex-claude`** (section 7) with a
+   conversation generation check in Rust and the same check in the island.
 5. **Codex running in WSL.** A Linux `cwd` such as `/home/...` is not an absolute
    Windows path, so both actions report the folder as unavailable.
 6. **Wording.** The credential-store error says "Unlock it and try again", which
@@ -191,6 +195,55 @@ testing:
    path to the new tab through an environment variable. With `-w 0` and an open
    Terminal window, check that the tab received it before treating a timeout as
    a product failure.
+
+### 7. Two Mochis: Anthropic and OpenAI (`windows-codex-claude`)
+
+Claude Code and Codex each get their own Mochi chat.
+
+- **Which Mochi answers.** The focused pill decides: with the Codex pill
+  focused, chat goes to OpenAI; with any other pill (Claude Code, other agents,
+  integrations), it goes to Anthropic. The rule lives in `chatProviderFor` in
+  [state.ts](../windows/src/core/state.ts) and follows the pill whose Mochi is on
+  screen.
+- **Look.** No drawing change was needed: the island already draws the big
+  Mochi in the focused pill's colour ([island.ts](../windows/src/island/island.ts),
+  `bodyColor`), so Codex's Mochi is pink and Claude Code's is near-white. In
+  Codex's chat the input placeholder also ends with "(OpenAI)"; Claude's keeps
+  its original wording.
+- **Separate conversations.** Rust keeps one history per Mochi and the island
+  one list per Mochi; switching pills swaps the conversation, pending reply, and
+  error. Dropping a file starts new conversations with both. A reply that
+  arrives after such a reset is discarded on both sides (review item 4).
+- **OpenAI client** ([openai.rs](../windows/src-tauri/src/openai.rs)): the
+  Responses API with the `web_search` tool, the same system prompt as Claude's
+  Mochi, `store: false` (the history stays in Coucou and is resent each turn),
+  and a 16,384-token output budget, since reasoning counts against it. Dropped
+  files mirror `claude.rs`: PDFs as `input_file`, PNG/JPEG/GIF/WebP as
+  `input_image`, other files inline as text up to 200 KB.
+- **Errors** use the same structured codes as Claude's Mochi. OpenAI reports
+  billing problems as HTTP 429, so `credit_balance_exhausted`, the spend/usage
+  limit codes, and `insufficient_quota` map to billing; other 429s are rate
+  limits. Messages name the Mochi, and **Chat settings** opens that Mochi's
+  section. Response bodies and keys are not passed to the UI.
+- **Settings.** **Claude's Mochi · Anthropic** and **Codex's Mochi · OpenAI**
+  share one component. The OpenAI key is stored as `openai-api-key` in the
+  credential store; the model is the new `openaiModel` setting (default
+  `gpt-6.1-sol`; the list offers `gpt-6.1-sol`, `gpt-6-astra`, and `gpt-6-luna`,
+  OpenAI's flagship models in its documentation in October 2026). Older
+  `settings.json` files load with the default. **Test connection** calls
+  `GET /v1/models/{model}` and sends no message.
+
+**Verified** on Windows on 3 October, run natively through Desktop Commander:
+`npm test` 27/27; `npx tsc --noEmit`; `cargo test -p coucou --lib --locked`
+19 passed and 3 native tests ignored; `cargo check --workspace --locked` with no
+warnings; `npm run build`. The Settings window and Codex's chat error were
+checked in a browser through `dev/phase1-preview.html` with the native bridge
+mocked.
+
+**Not verified:** no real Anthropic or OpenAI request was made (no key was
+used), so the web search tool, file inputs, model availability, and real error
+bodies are untested against the live APIs. The running app was not exercised:
+the installed Coucou was running, and the app allows a single instance.
 
 ## Where the implementation lives
 
@@ -202,13 +255,14 @@ testing:
 | [views.ts](../windows/src/views/views.ts) | Activity ticker, finished-card actions, and agent-specific finished-card label |
 | [island.ts](../windows/src/island/island.ts) | Terminal, VS Code, and ↗ routing; launch error note |
 | [launch.rs](../windows/src-tauri/src/launch.rs) and [lib.rs](../windows/src-tauri/src/lib.rs) | Folder validation, Windows Terminal/PowerShell and VS Code launchers, Tauri commands |
-| [claude.rs](../windows/src-tauri/src/claude.rs) | Mochi chat API calls, structured errors, and the connection test |
+| [claude.rs](../windows/src-tauri/src/claude.rs) | Claude's Mochi (Anthropic), shared conversation store and structured errors, connection test |
+| [openai.rs](../windows/src-tauri/src/openai.rs) | Codex's Mochi (OpenAI Responses API), error mapping, connection test |
 | [secrets.rs](../windows/src-tauri/src/secrets.rs) | Credential read, save, and remove with verification |
-| [chat.ts](../windows/src/views/chat.ts) | Chat errors, retry, and the Chat settings action |
+| [chat.ts](../windows/src/views/chat.ts) | Chat per Mochi, errors, retry, and the Chat settings action |
 | [settings](../windows/src/settings/main.ts) and [hook installer](../windows/src-tauri/src/hooks.rs) | Settings window (chat key and connection test) and Claude Code hook installation |
 | [pipe.rs](../windows/src-tauri/src/pipe.rs) and [relay](../windows/hook/src/main.rs) | Native transport and hook forwarding |
 | [hooks.test.mjs](../windows/tests/hooks.test.mjs) | 16 lifecycle and routing regression tests |
-| [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 7 Phase 1 view tests |
+| [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 7 Phase 1 view tests and 4 two-Mochi tests |
 
 ## What was verified
 
@@ -290,6 +344,8 @@ Items 4 and 5 also cover the Codex lifecycle work.
 
 1. **Close Phase 1.** Commit the review fix, decide review items 1–3, run the
    checks above, and merge `windows-phase1` into `windows-codex`.
+   Then validate `windows-codex-claude` with real keys: a reply, web search, a
+   dropped PDF and image, a wrong key, and **Test connection** for each Mochi.
 2. **Then start Phase 2 with read-only Codex hook diagnostics.** Settings shows
    whether `%USERPROFILE%\.codex\hooks.json` exists and parses, which Coucou
    events are registered, whether each `commandWindows` value starts with `&`

@@ -20,10 +20,17 @@ pub struct Settings {
     /// Defaulted explicitly so a settings.json written by an older build still loads.
     #[serde(default = "default_model")]
     pub model: String,
+    /// OpenAI model used by Codex's Mochi (the chat while the Codex pill is focused).
+    #[serde(default = "default_openai_model")]
+    pub openai_model: String,
 }
 
 fn default_model() -> String {
     crate::claude::DEFAULT_MODEL.to_string()
+}
+
+fn default_openai_model() -> String {
+    crate::openai::DEFAULT_MODEL.to_string()
 }
 
 impl Default for Settings {
@@ -43,6 +50,7 @@ impl Default for Settings {
             autostart: false,
             hooks_installed: false,
             model: default_model(),
+            openai_model: default_openai_model(),
         }
     }
 }

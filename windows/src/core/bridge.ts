@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Settings } from "./state";
+import type { ChatProvider, Settings } from "./state";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -57,7 +57,7 @@ export const Bridge = {
 
   quit: () => call<void>("quit_app"),
 
-  openSettingsWindow: (section?: "claude") => call<void>("open_settings_window", { section: section ?? null }),
+  openSettingsWindow: (section?: SettingsSection) => call<void>("open_settings_window", { section: section ?? null }),
 
   /** Writes to %LOCALAPPDATA%\Coucou\coucou.log, next to the Rust lines. */
   log: (message: string) => call<void>("log_line", { message }),
@@ -81,11 +81,13 @@ export const Bridge = {
   approvalDecline: (requestId: string) => call<void>("approval_decline", { requestId }),
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
-  /** One chat turn. The API key and any file bytes never leave Rust. */
-  chatSend: (query: string, context: ChatContext | null) =>
-    callOrThrow<{ text: string }>("chat_send", { query, context }),
+  /** One chat turn with the given Mochi. The API key and any file bytes never leave Rust. */
+  chatSend: (provider: ChatProvider, query: string, context: ChatContext | null) =>
+    callOrThrow<{ text: string }>("chat_send", { provider, query, context }),
+  /** Starts new conversations with both Mochis. */
   chatReset: () => call<void>("chat_reset"),
-  chatTestConnection: (model: string) => callOrThrow<void>("chat_test_connection", { model }),
+  chatTestConnection: (provider: ChatProvider, model: string) =>
+    callOrThrow<void>("chat_test_connection", { provider, model }),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
@@ -107,6 +109,13 @@ export interface IntegrationUpdate {
   data: Record<string, unknown>;
   error: string | null;
   event: { success: boolean; label: string; detail: string | null } | null;
+}
+
+/** Settings window sections that `openSettingsWindow` can scroll to. */
+export type SettingsSection = "claude" | "openai";
+
+export function settingsSectionFor(provider: ChatProvider): SettingsSection {
+  return provider === "openai" ? "openai" : "claude";
 }
 
 export interface ChatFailure {

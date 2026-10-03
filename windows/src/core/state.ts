@@ -4,6 +4,13 @@ import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./l
 import type { EyeShape } from "../mochi/engine";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
+/** Whose brain answers the chat: Codex's Mochi uses OpenAI, the others Anthropic. */
+export type ChatProvider = "anthropic" | "openai";
+
+export function chatProviderFor(focusId: string | null): ChatProvider {
+  return focusId === "agent_codex" ? "openai" : "anthropic";
+}
+
 export type PillBadge = "approval" | "finished" | "error";
 
 export interface AgentTask {
@@ -93,6 +100,8 @@ export interface Settings {
   hooksInstalled: boolean;
   /** Claude model used by the chat. */
   model: string;
+  /** OpenAI model used by Codex's Mochi. */
+  openaiModel: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -107,6 +116,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autostart: false,
   hooksInstalled: false,
   model: "claude-opus-5",
+  openaiModel: "gpt-6.1-sol",
 };
 
 type Listener = () => void;
@@ -136,7 +146,8 @@ class AppState {
   droppedFile: { name: string; path: string } | null = null;
   noteMessage: string | null = null;
   searchResult: SearchResult | null = null;
-  chatHistory: ChatMessage[] = [];
+  /** One conversation per Mochi, so switching pills never mixes them. */
+  chatHistories: Record<ChatProvider, ChatMessage[]> = { anthropic: [], openai: [] };
   pendingApproval: ApprovalInfo | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
@@ -167,6 +178,21 @@ class AppState {
 
   get otherTasks(): AgentTask[] {
     return this.tasks.filter((t) => t.id !== this.focusId);
+  }
+
+  /** Follows the Mochi on screen, which takes the focused pill's colour. */
+  get chatProvider(): ChatProvider {
+    return chatProviderFor(this.focusTask?.id ?? null);
+  }
+
+  /** The conversation of the Mochi on screen. */
+  get chatHistory(): ChatMessage[] {
+    return this.chatHistories[this.chatProvider];
+  }
+
+  /** A dropped file starts a new conversation with both Mochis. */
+  resetChats() {
+    this.chatHistories = { anthropic: [], openai: [] };
   }
 
   setFocus(id: string) {
