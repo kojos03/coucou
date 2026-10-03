@@ -215,6 +215,22 @@ test('Claude completion and external permission decline retain their existing be
   assert.deepEqual(f.declined, ['approval-test']);
 });
 
+test('other external agents keep the folder used by terminal and VS Code actions', () => {
+  const f = fixture();
+  const send = (name, extra = {}) => f.listener({ coucou_agent: 'gemini', hook_event_name: name, ...extra });
+  send('UserPromptSubmit', { cwd: 'C:/gemini project', prompt: 'Gemini prompt' });
+  assert.equal(f.State.focusId, 'agent_gemini');
+  assert.equal(f.State.focusTask.sessionCwd, 'C:/gemini project');
+  send('PreToolUse', { tool_name: 'Read', tool_input: {} });
+  assert.equal(f.State.focusTask.sessionCwd, 'C:/gemini project');
+  send('PreToolUse', { cwd: 'C:/gemini other', tool_name: 'Read', tool_input: {} });
+  assert.equal(f.State.focusTask.sessionCwd, 'C:/gemini other');
+  send('Stop', { message: 'Gemini result' });
+  assert.equal(f.State.view, 'finished');
+  assert.equal(f.State.focusTask.sessionCwd, 'C:/gemini other');
+  assert.equal(f.task().sessionCwd ?? null, null);
+});
+
 test('pause ignores Codex lifecycle events and immediately declines pending approval', () => {
   const f = fixture();
   f.State.paused = true;

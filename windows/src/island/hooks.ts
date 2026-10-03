@@ -188,6 +188,10 @@ const ensurePill = () => {
       displayName,
       agentColor(validAgent!),
     );
+    // Terminal and VS Code actions open the focused pill's folder. Codex
+    // replaces it with the selected session's folder below.
+    const task = State.tasks.find((entry) => entry.id === agentId);
+    if (task && cwd) task.sessionCwd = cwd;
   } else {
     upsert(projectName, cwd);
   }

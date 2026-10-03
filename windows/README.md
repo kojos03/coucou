@@ -21,6 +21,9 @@ The `windows-codex` branch of [kojos03/coucou](https://github.com/kojos03/coucou
 contains the Windows Codex activity and completion work. See the
 [progress report and next phases](../docs/WINDOWS_CODEX_STATUS.md) for completed
 changes, verification results, known limitations, and the collaborator workflow.
+Phase 1 (separate terminal and VS Code actions, chat setup errors, and a
+connection test) is on the `windows-phase1` branch, awaits native Windows
+validation, and is not yet merged into `windows-codex`.
 Codex hook setup is currently manual; Mochi chat uses a separate Anthropic API key.
 
 <img src="screenshots/greeting.png" width="640" alt="Mochi waving hello at launch">
@@ -78,9 +81,11 @@ It works from any terminal — Windows Terminal, PowerShell, VS Code, Git Bash.
 
 ## Chat and keys
 
-**Settings… → Claude** takes your Anthropic API key. Keys live in the **Windows
-Credential Manager**, never on disk and never in the interface — the island can
-only ask whether a key exists. Same for every integration key.
+**Settings… → Mochi chat · Anthropic** takes your Anthropic API key. Keys live in
+the **Windows Credential Manager**, never on disk and never in the interface — the
+island can only ask whether a key exists. Same for every integration key.
+**Test connection** checks that the saved key can see the selected model without
+sending a message; it does not check billing or a full chat reply.
 
 No telemetry. The only network requests Coucou makes are to the services you
 configure yourself.
@@ -151,8 +156,10 @@ problems. It stays on your machine.
 - Permission approval works from **any** terminal; the Mac build only listens to
   VS Code sessions.
 - Not in this version: sending a file by email, dragging Mochi onto a window to
-  attach it as context, and jumping to a specific terminal window — "Open
-  terminal" opens the working folder in VS Code when `code` is on your `PATH`.
+  attach it as context, and jumping to a specific terminal window. **Open
+  terminal** opens a new Windows Terminal tab (or a Windows PowerShell window)
+  in the working folder; **Open in VS Code** opens it in VS Code when `code` is
+  on your `PATH`.
 - Cal.com shows the next bookings as a list rather than the Mac's calendar.
 
 ## Linux
@@ -188,4 +195,5 @@ What changes on Linux:
   `~/.local/share/coucou/coucou.log`.
 - What the Windows build leaves out, this one does too: sending a file by
   email, dragging Mochi onto a window, and jumping to a specific terminal
-  window — "Open terminal" opens the folder in VS Code.
+  window. **Open terminal** is Windows-only for now and shows a message pointing
+  to **Open in VS Code**, which opens the folder in VS Code.
