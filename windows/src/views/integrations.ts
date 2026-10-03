@@ -53,7 +53,7 @@ const OPEN_URLS: Record<string, string> = {
   integration_calcom: "https://app.cal.com/bookings",
 };
 
-function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
+function idleCard(task: AgentTask, openSettings: () => void, openVSCode: () => void): HTMLElement {
   const info = State.integrations[task.id];
   const configured = info?.configured ?? false;
   const error = info?.error ?? null;
@@ -70,7 +70,7 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
         class: "link-btn",
         style: `color:${task.color}b3`,
         text: "Open Visual Studio Code",
-        onclick: () => void Bridge.openInVSCode(task.sessionCwd ?? null),
+        onclick: openVSCode,
       }),
     );
   } else if (task.id === "integration_n8n") {
@@ -317,9 +317,9 @@ function calcomCard(): HTMLElement {
 
 // ── n8n ───────────────────────────────────────────────────────────────────────
 
-function n8nCard(task: AgentTask, onDetail: () => void, openSettings: () => void): HTMLElement {
+function n8nCard(task: AgentTask, onDetail: () => void, openSettings: () => void, openVSCode: () => void): HTMLElement {
   const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
-  if (!hasActivity) return idleCard(task, openSettings);
+  if (!hasActivity) return idleCard(task, openSettings, openVSCode);
   const success = task.state === "finished";
   const accent = success ? "#22C55E" : "#F4505E";
   return h(
@@ -379,6 +379,7 @@ export interface IntegrationCardHooks {
   openDetail(): void;
   closeDetail(): void;
   openSettings(): void;
+  openVSCode(): void;
 }
 
 /** True when this integration has data worth showing instead of the idle card. */
@@ -408,12 +409,12 @@ export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHoo
     const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
     return hooks.detailOpen && hasActivity
       ? n8nDetail(task, hooks.closeDetail)
-      : n8nCard(task, hooks.openDetail, hooks.openSettings);
+      : n8nCard(task, hooks.openDetail, hooks.openSettings, hooks.openVSCode);
   }
   if (task.id === "integration_vercel" && hasIntegrationData(task.id)) {
     return hooks.detailOpen ? vercelDetail(hooks.closeDetail) : vercelCard(hooks.openDetail);
   }
-  if (!hasIntegrationData(task.id)) return idleCard(task, hooks.openSettings);
+  if (!hasIntegrationData(task.id)) return idleCard(task, hooks.openSettings, hooks.openVSCode);
 
   switch (task.id) {
     case "integration_resend":
@@ -427,7 +428,7 @@ export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHoo
     case "integration_calcom":
       return calcomCard();
     default:
-      return idleCard(task, hooks.openSettings);
+      return idleCard(task, hooks.openSettings, hooks.openVSCode);
   }
 }
 

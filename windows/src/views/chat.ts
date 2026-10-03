@@ -3,7 +3,7 @@
 
 import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
-import { Bridge, type ChatContext } from "../core/bridge";
+import { Bridge, chatFailure, type ChatContext } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import type { ViewHost } from "./views";
@@ -39,6 +39,7 @@ function contextChip(label: string): HTMLElement {
 export function buildPrompt(onHeightChange: () => void): ViewHost {
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log" });
+  const errorBox = h("div", { class: "chat-error", role: "alert", hidden: true });
   const input = h("input", {
     type: "text",
     class: "chat-input",
@@ -51,7 +52,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const el = h(
     "div",
     { class: "view" },
-    h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, log, bar)),
+    h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, log, errorBox, bar)),
   );
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
@@ -62,10 +63,13 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     const query = input.value.trim();
     if (!query || sending) return;
     input.value = "";
+    errorBox.hidden = true;
+    clear(errorBox);
     sending = true;
     Sound.play("send");
 
-    State.chatHistory.push({ id: nextId++, role: "user", content: query });
+    const message: ChatMessage = { id: nextId++, role: "user", content: query };
+    State.chatHistory.push(message);
     State.stateOverride = "thinking";
     State.notify();
     onHeightChange();
@@ -81,8 +85,21 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       Sound.play("finish");
     } catch (err) {
       State.stateOverride = null;
-      State.noteMessage = String(err).replace(/^Error:\s*/, "");
-      State.view = "note";
+      // The backend rolls back failed turns too. Preserve the draft and first-file
+      // context so a setup error does not lose the user's question or attachment.
+      State.chatHistory = State.chatHistory.filter((entry) => entry.id !== message.id);
+      input.value = query;
+      const failure = chatFailure(err);
+      const actions = h("div", { class: "actions" });
+      if (failure.settings) {
+        actions.append(h("button", {
+          class: "btn secondary", text: "Chat settings",
+          onclick: () => void Bridge.openSettingsWindow("claude"),
+        }));
+      }
+      actions.append(h("button", { class: "btn secondary", text: "Retry", onclick: () => void submit() }));
+      errorBox.append(h("div", { text: failure.message }), actions);
+      errorBox.hidden = false;
       Sound.play("error");
     } finally {
       sending = false;
@@ -124,6 +141,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
 
       input.placeholder = State.chatHistory.length === 0 ? "Ask me anything…" : "Continue…";
       input.disabled = sending;
+      send.disabled = sending;
     },
     focus() {
       input.focus();

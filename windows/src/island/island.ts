@@ -113,7 +113,11 @@ export class Island {
       },
       openTerminal: () => {
         const cwd = State.focusTask?.sessionCwd ?? null;
-        void Bridge.openInVSCode(cwd);
+        void Bridge.openTerminal(cwd).catch((err) => this.launchError(err));
+      },
+      openVSCode: () => {
+        void Bridge.openInVSCode(State.focusTask?.sessionCwd ?? null)
+          .catch((err) => this.launchError(err));
       },
       // The ↗ button — same targets as openAgentTarget() on macOS.
       openTarget: () => {
@@ -127,7 +131,8 @@ export class Island {
           integration_notion: "https://notion.so",
           integration_calcom: "https://app.cal.com/bookings",
         };
-        if (task.id === "integration_claude") void Bridge.openInVSCode(task.sessionCwd ?? null);
+        if (task.id === "integration_claude") actions.openVSCode();
+        else if (task.source === "agent") actions.openTerminal();
         else if (task.id === "integration_n8n") void Bridge.openN8n();
         else if (urls[task.id]) void Bridge.openUrl(urls[task.id]);
       },
@@ -222,6 +227,12 @@ export class Island {
   }
 
   // ── FSM ─────────────────────────────────────────────────────────────────────
+
+  private launchError(error: unknown) {
+    State.noteMessage = error instanceof Error ? error.message : String(error);
+    this.setView("note");
+    Sound.play("error");
+  }
 
   private wireFsm() {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;

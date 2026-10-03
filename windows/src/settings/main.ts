@@ -3,7 +3,7 @@
 // integrations land here too in a later stage.
 
 import "./settings.css";
-import { Bridge, onEvent, type HookStatus } from "../core/bridge";
+import { Bridge, chatFailure, onEvent, type HookStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
 
@@ -179,58 +179,100 @@ const MODELS: [string, string][] = [
   ["claude-haiku-4-5", "Claude Haiku 4.5"],
 ];
 
-function apiSection(hasKey: boolean): HTMLElement {
-  const dot = statusDot(hasKey);
-  const state = h("span", { class: "hint", text: hasKey ? "Key saved in the Windows Credential Manager." : "No key yet — the chat needs one." });
-
+function apiSection(): HTMLElement {
+  const dot = statusDot(false);
+  const state = h("span", { class: "hint", text: "Checking the credential store…" });
   const field = h("input", {
-    type: "password",
-    placeholder: hasKey ? "••••••••••••  (stored)" : "sk-ant-...",
-    style: "flex:1 1 auto;min-width:0",
-    autocomplete: "off",
-    spellcheck: "false",
-  }) as HTMLInputElement;
-
+    type: "password", placeholder: "sk-ant-...", "aria-label": "Anthropic API key",
+    style: "flex:1 1 auto;min-width:0", autocomplete: "off", spellcheck: "false",
+  });
   const saveBtn = h("button", { class: "primary", text: "Save key" });
-  const clearBtn = h("button", { class: "danger", text: "Remove" });
-  const feedback = h("div", {});
+  const clearBtn = h("button", { class: "danger", text: "Remove", hidden: true });
+  const testBtn = h("button", { text: "Test connection", disabled: true });
+  const feedback = h("div", { role: "status", "aria-live": "polite" });
+  const model = h("select", { "aria-label": "Chat model" });
+  let busy = false;
+  let present = false;
+
+  function setBusy(value: boolean) {
+    busy = value;
+    saveBtn.disabled = clearBtn.disabled = field.disabled = model.disabled = value;
+    testBtn.disabled = value || !present;
+  }
+
+  function notice(text: string, ok = false) {
+    clear(feedback);
+    feedback.append(h("div", { class: ok ? "notice ok" : "notice err", text }));
+  }
 
   async function refresh() {
-    const present = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
-    dot.style.background = present ? "#22c55e" : "#f4505e";
-    state.textContent = present
-      ? "Key saved in the Windows Credential Manager."
-      : "No key yet — the chat needs one.";
-    field.placeholder = present ? "••••••••••••  (stored)" : "sk-ant-...";
-    clearBtn.style.display = present ? "" : "none";
+    try {
+      present = await Bridge.secretPresent("anthropic-api-key");
+      dot.style.background = present ? "#22c55e" : "#f4505e";
+      state.textContent = present ? "API key saved securely." : "Add an Anthropic API key to use Mochi chat.";
+      field.placeholder = present ? "••••••••••••  (stored)" : "sk-ant-...";
+      clearBtn.hidden = !present;
+      testBtn.disabled = busy || !present;
+      return true;
+    } catch (error) {
+      present = false;
+      dot.style.background = "#f5a524";
+      state.textContent = "Could not check the credential store.";
+      notice(chatFailure(error).message);
+      testBtn.disabled = true;
+      return false;
+    }
   }
 
   saveBtn.addEventListener("click", async () => {
+    if (busy) return;
     const value = field.value.trim();
-    if (!value) return;
+    if (!value) { notice("Paste an Anthropic API key before saving."); return; }
     clear(feedback);
+    setBusy(true);
     try {
       await Bridge.secretSet("anthropic-api-key", value);
+      if (await refresh()) notice("Key saved securely. You can now test the connection.", true);
+    } catch (error) {
+      notice(chatFailure(error).message);
+    } finally {
       field.value = "";
-      feedback.append(h("div", { class: "notice ok", text: "Saved. It never touches disk." }));
-      await refresh();
-    } catch (err) {
-      feedback.append(h("div", { class: "notice err", text: `Could not save: ${String(err)}` }));
+      setBusy(false);
     }
   });
 
   clearBtn.addEventListener("click", async () => {
+    if (busy) return;
+    setBusy(true);
     clear(feedback);
     try {
       await Bridge.secretClear("anthropic-api-key");
-      feedback.append(h("div", { class: "notice ok", text: "Key removed." }));
-      await refresh();
-    } catch (err) {
-      feedback.append(h("div", { class: "notice err", text: `Could not remove: ${String(err)}` }));
+      field.value = "";
+      if (await refresh()) notice("Key removed.", true);
+    } catch (error) {
+      notice(chatFailure(error).message);
+    } finally {
+      setBusy(false);
     }
   });
 
-  const model = h("select", {}) as HTMLSelectElement;
+  testBtn.addEventListener("click", async () => {
+    if (busy) return;
+    if (field.value.trim()) { notice("Save the new key before testing it."); return; }
+    setBusy(true);
+    testBtn.textContent = "Testing…";
+    clear(feedback);
+    try {
+      await Bridge.chatTestConnection(model.value);
+      notice("Connected. The saved key can access this model. No chat message was sent; billing and message generation are not tested.", true);
+    } catch (error) {
+      notice(chatFailure(error).message);
+    } finally {
+      testBtn.textContent = "Test connection";
+      setBusy(false);
+    }
+  });
+
   for (const [id, label] of MODELS) model.append(h("option", { value: id, text: label }));
   if (!MODELS.some(([id]) => id === settings.model)) {
     model.append(h("option", { value: settings.model, text: settings.model }));
@@ -238,20 +280,31 @@ function apiSection(hasKey: boolean): HTMLElement {
   model.value = settings.model;
   model.addEventListener("change", () => {
     settings.model = model.value;
+    clear(feedback);
     void save();
   });
 
-  clearBtn.style.display = hasKey ? "" : "none";
-
-  return h(
-    "section",
-    {},
-    h("h2", {}, dot, h("span", { text: "Claude" })),
+  const section = h(
+    "section", { id: "claude-api" },
+    h("h2", {}, dot, h("span", { text: "Mochi chat · Anthropic" })),
+    h("div", { class: "hint", text: "Chat uses a separate Anthropic API key. Signing into Codex does not configure it. Keys are stored in the operating system's credential store." }),
     state,
     h("div", { class: "row" }, h("label", { text: "API key" }), field, saveBtn, clearBtn),
     h("div", { class: "row" }, h("label", { text: "Model" }), model),
+    h("div", { class: "row" }, testBtn, h("button", {
+      text: "Anthropic Console", onclick: () => void Bridge.openUrl("https://console.anthropic.com/"),
+    })),
+    h("div", { class: "hint", text: "Test connection checks the saved key and selected model without sending a chat message." }),
     feedback,
   );
+  void refresh();
+  void onEvent<string>("settings-section", (target) => {
+    if (target !== "claude") return;
+    section.scrollIntoView({ block: "start" });
+    field.focus({ preventScroll: true });
+    void refresh();
+  });
+  return section;
 }
 
 // ── Integrations section ──────────────────────────────────────────────────────
@@ -429,20 +482,18 @@ async function main() {
     installed: false, settingsPath: "", hookPath: "", hookReady: false,
   };
 
-  const hasKey = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
-
   const keys = [
     "stripe-api-key", "github-token", "vercel-token",
     "n8n-url", "n8n-api-key", "resend-api-key", "notion-api-key", "calcom-api-key",
   ];
   const present: Record<string, boolean> = {};
-  for (const k of keys) present[k] = (await Bridge.secretPresent(k)) ?? false;
+  for (const k of keys) present[k] = await Bridge.secretPresent(k).catch(() => false);
 
   clear(root);
   root.append(
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
     claudeSection(status),
-    apiSection(hasKey),
+    apiSection(),
     integrationsSection(present),
     generalSection(),
     h("div", {

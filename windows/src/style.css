@@ -802,6 +802,17 @@ input[type="range"]::-webkit-slider-thumb {
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
+.chat-error {
+  flex: 0 1 auto;
+  overflow-y: auto;
+  color: var(--ink-2);
+  font: 400 12px/1.4 var(--font);
+}
+
+.chat-error .actions {
+  margin-top: 8px;
+}
+
 .chat-row {
   display: flex;
 }

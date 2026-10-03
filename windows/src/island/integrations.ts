@@ -28,7 +28,7 @@ export function registerIntegrationHandlers(island: Island) {
 /** Asks Rust which keys exist so the idle cards can say so. */
 export async function refreshConfigured() {
   for (const [id, key] of Object.entries(KEY_FOR)) {
-    const present = (await Bridge.secretPresent(key)) ?? false;
+    const present = await Bridge.secretPresent(key).catch(() => false);
     const info = State.integrations[id] ?? { data: {}, error: null, loaded: false, configured: false };
     State.integrations[id] = { ...info, configured: present };
   }

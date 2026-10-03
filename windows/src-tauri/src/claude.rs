@@ -68,6 +68,47 @@ pub struct ChatReply {
     pub text: String,
 }
 
+/// Stable error categories let the UI offer setup without inspecting error prose.
+#[derive(Debug, Serialize)]
+pub struct ChatError {
+    pub code: &'static str,
+    pub message: String,
+    pub settings: bool,
+}
+
+impl ChatError {
+    fn new(code: &'static str, message: impl Into<String>, settings: bool) -> Self {
+        Self { code, message: message.into(), settings }
+    }
+}
+
+fn api_key() -> Result<String, ChatError> {
+    secrets::read("anthropic-api-key")
+        .map_err(|message| ChatError::new("credential_store", message, true))?
+        .ok_or_else(|| ChatError::new(
+            "missing_key",
+            "Mochi chat needs an Anthropic API key. Add one in Chat settings. Your Codex sign-in does not set up this separate chat.",
+            true,
+        ))
+}
+
+/// Validate the saved key and selected model without generating a message.
+pub async fn test_connection(model: &str) -> Result<(), ChatError> {
+    let key = api_key()?;
+    if model.is_empty() {
+        return Err(ChatError::new("model", "Choose a model in Chat settings.", true));
+    }
+    let mut url = reqwest::Url::parse("https://api.anthropic.com/v1/models/").unwrap();
+    url.path_segments_mut().unwrap().pop_if_empty().push(model);
+    let body = request(client(20)?.get(url)
+        .header("x-api-key", key)
+        .header("anthropic-version", ANTHROPIC_VERSION)).await?;
+    if body.get("type").and_then(Value::as_str) != Some("model") {
+        return Err(ChatError::new("response", "Anthropic returned an unexpected model response. Try again.", false));
+    }
+    Ok(())
+}
+
 /// One chat turn. Returns the assistant's text, or a message the island shows
 /// in the note view.
 pub async fn send(
@@ -75,9 +116,8 @@ pub async fn send(
     model: &str,
     query: String,
     context: Option<ChatContext>,
-) -> Result<ChatReply, String> {
-    let key = secrets::get("anthropic-api-key")
-        .ok_or_else(|| "API key missing. Open settings.".to_string())?;
+) -> Result<ChatReply, ChatError> {
+    let key = api_key()?;
 
     let mut content: Vec<Value> = Vec::new();
 
@@ -125,22 +165,13 @@ pub async fn send(
     // A policy decline comes back as HTTP 200 with stop_reason "refusal".
     if response.get("stop_reason").and_then(Value::as_str) == Some("refusal") {
         chat.pop();
-        let why = response
-            .get("stop_details")
-            .and_then(|d| d.get("explanation"))
-            .and_then(Value::as_str)
-            .unwrap_or("Claude declined this one.");
-        return Err(why.to_string());
+        return Err(ChatError::new("refusal", "Claude declined this request. Try rephrasing it.", false));
     }
 
     let Some(blocks) = response.get("content").and_then(Value::as_array).cloned() else {
         chat.pop();
-        return Err("Unexpected API response.".into());
+        return Err(ChatError::new("response", "Anthropic returned an unexpected response. Try again.", false));
     };
-
-    // Store the whole content — tool_use / tool_result blocks included — so the
-    // next turn has the right context.
-    chat.push(json!({ "role": "assistant", "content": blocks.clone() }));
 
     let text = blocks
         .iter()
@@ -152,44 +183,67 @@ pub async fn send(
         .to_string();
 
     if text.is_empty() {
-        return Err("No response text.".into());
+        chat.pop();
+        return Err(ChatError::new("response", "Claude returned no text. Try again.", false));
     }
+    // Commit a successful turn only after there is text to show in the UI.
+    chat.push(json!({ "role": "assistant", "content": blocks }));
     Ok(ChatReply { text })
 }
 
-async fn call(key: &str, body: &Value) -> Result<Value, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
+fn client(timeout: u64) -> Result<reqwest::Client, ChatError> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| ChatError::new("network", "Could not initialize the secure connection. Restart Coucou and try again.", false))
+}
 
-    let response = client
+async fn call(key: &str, body: &Value) -> Result<Value, ChatError> {
+    request(client(90)?
         .post(ENDPOINT)
         .header("x-api-key", key)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("anthropic-beta", FALLBACK_BETA)
         .header("content-type", "application/json")
-        .json(body)
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {e}"))?;
+        .json(body)).await
+}
 
-    let status = response.status();
-    let text = response.text().await.map_err(|e| e.to_string())?;
-    if !status.is_success() {
-        // Surface the API's own message, which is what makes a bad key obvious.
-        let detail = serde_json::from_str::<Value>(&text)
-            .ok()
-            .and_then(|v| {
-                v.get("error")
-                    .and_then(|e| e.get("message"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| text.chars().take(200).collect());
-        return Err(format!("Claude API {status}: {detail}"));
+fn network_error(error: reqwest::Error) -> ChatError {
+    if error.is_timeout() {
+        ChatError::new("timeout", "Anthropic did not respond in time. Try again.", false)
+    } else {
+        ChatError::new("network", "Could not reach Anthropic. Check your connection, proxy, or firewall and try again.", false)
     }
-    serde_json::from_str(&text).map_err(|e| format!("Bad API response: {e}"))
+}
+
+/// Never forward arbitrary response bodies or credential values to the UI/log.
+fn api_error(status: u16, body: &str) -> ChatError {
+    let value: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    let detail = value["error"]["message"].as_str().unwrap_or("").to_lowercase();
+    match status {
+        401 => ChatError::new("authentication", "Anthropic rejected the saved API key. Replace it in Chat settings.", true),
+        403 => ChatError::new("permission", "This API key does not have access to the requested resource. Check its workspace and permissions.", true),
+        404 => ChatError::new("model", "The selected model is unavailable for this API key. Choose another model in Chat settings.", true),
+        400 | 402 if detail.contains("credit") || detail.contains("billing") || status == 402 =>
+            ChatError::new("billing", "The Anthropic account needs API credits or a billing update. Check billing in the Anthropic Console.", true),
+        400 => ChatError::new("request", "Anthropic could not accept this request. Check the selected model or try a shorter message.", true),
+        413 => ChatError::new("request_size", "This request is too large. Try a smaller file or start a shorter conversation.", false),
+        429 => ChatError::new("rate_limit", "Anthropic's rate limit was reached. Wait a moment and try again.", false),
+        500..=599 => ChatError::new("service", "Anthropic is temporarily unavailable. Try again later.", false),
+        _ => ChatError::new("api", format!("Anthropic returned HTTP {status}. Try again or check Chat settings."), true),
+    }
+}
+
+async fn request(builder: reqwest::RequestBuilder) -> Result<Value, ChatError> {
+    let response = builder.send().await.map_err(network_error)?;
+    let status = response.status();
+    let text = response.text().await.map_err(network_error)?;
+    if !status.is_success() {
+        return Err(api_error(status.as_u16(), &text));
+    }
+    serde_json::from_str(&text)
+        .map_err(|_| ChatError::new("response", "Anthropic returned unreadable data. Try again.", false))
 }
 
 /// PDF → document block, image → image block, text/code → inline text.
@@ -248,7 +302,47 @@ fn base64(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::base64;
+    use super::*;
+
+    #[test]
+    fn api_errors_are_actionable_and_do_not_echo_response_bodies() {
+        for (status, code, settings) in [
+            (401, "authentication", true), (403, "permission", true),
+            (404, "model", true), (400, "request", true),
+            (413, "request_size", false), (429, "rate_limit", false),
+            (500, "service", false), (529, "service", false),
+        ] {
+            let error = api_error(status, r#"{"error":{"message":"sensitive-sentinel"}}"#);
+            assert_eq!(error.code, code);
+            assert_eq!(error.settings, settings);
+            assert!(!serde_json::to_string(&error).unwrap().contains("sensitive-sentinel"));
+        }
+        assert_eq!(api_error(400, r#"{"error":{"message":"Your credit balance is too low"}}"#).code, "billing");
+        assert_eq!(api_error(502, "<html>sensitive-sentinel</html>").code, "service");
+    }
+
+    #[test]
+    fn http_errors_and_invalid_success_bodies_use_the_same_safe_path() {
+        use std::io::{Read, Write};
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        for (status, body, expected) in [
+            ("401 Unauthorized", r#"{"error":{"message":"sensitive-sentinel"}}"#, "authentication"),
+            ("200 OK", "not json", "response"),
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = [0; 4096];
+                let _ = stream.read(&mut buffer).unwrap();
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let error = runtime.block_on(request(client(5).unwrap().get(url))).unwrap_err();
+            server.join().unwrap();
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("sensitive-sentinel"));
+        }
+    }
 
     #[test]
     fn base64_matches_rfc4648_vectors() {

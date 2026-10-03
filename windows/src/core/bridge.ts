@@ -52,12 +52,12 @@ export const Bridge = {
 
   openUrl: (url: string) => call<void>("open_url", { url }),
 
-  /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
-  openInVSCode: (path: string | null) => call<boolean>("open_in_vscode", { path }),
+  openTerminal: (path: string | null) => callOrThrow<void>("open_terminal", { path }),
+  openInVSCode: (path: string | null) => callOrThrow<void>("open_in_vscode", { path }),
 
   quit: () => call<void>("quit_app"),
 
-  openSettingsWindow: () => call<void>("open_settings_window"),
+  openSettingsWindow: (section?: "claude") => call<void>("open_settings_window", { section: section ?? null }),
 
   /** Writes to %LOCALAPPDATA%\Coucou\coucou.log, next to the Rust lines. */
   log: (message: string) => call<void>("log_line", { message }),
@@ -85,10 +85,11 @@ export const Bridge = {
   chatSend: (query: string, context: ChatContext | null) =>
     callOrThrow<{ text: string }>("chat_send", { query, context }),
   chatReset: () => call<void>("chat_reset"),
+  chatTestConnection: (model: string) => callOrThrow<void>("chat_test_connection", { model }),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
-  secretPresent: (key: string) => call<boolean>("secret_present", { key }),
+  secretPresent: (key: string) => callOrThrow<boolean>("secret_present", { key }),
   secretSet: (key: string, value: string) => callOrThrow<void>("secret_set", { key, value }),
   secretClear: (key: string) => callOrThrow<void>("secret_clear", { key }),
 
@@ -106,6 +107,24 @@ export interface IntegrationUpdate {
   data: Record<string, unknown>;
   error: string | null;
   event: { success: boolean; label: string; detail: string | null } | null;
+}
+
+export interface ChatFailure {
+  code: string;
+  message: string;
+  settings: boolean;
+}
+
+export function chatFailure(error: unknown): ChatFailure {
+  if (error && typeof error === "object" && "message" in error &&
+      typeof error.message === "string") {
+    return {
+      code: "code" in error && typeof error.code === "string" ? error.code : "unknown",
+      message: error.message,
+      settings: "settings" in error && error.settings === true,
+    };
+  }
+  return { code: "unknown", message: typeof error === "string" ? error : "Could not complete the request. Try again.", settings: false };
 }
 
 export type ChatContext =

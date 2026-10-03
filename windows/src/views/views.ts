@@ -17,6 +17,7 @@ export interface ViewActions {
   collapse(): void;
   setFocus(id: string): void;
   openTerminal(): void;
+  openVSCode(): void;
   /** The ↗ button: opens whatever the focused pill points at. */
   openTarget(): void;
   openUrl(url: string): void;
@@ -156,6 +157,7 @@ function buildOverview(actions: ViewActions): ViewHost {
       State.notify();
     },
     openSettings: () => actions.openSettingsWindow(),
+    openVSCode: () => actions.openVSCode(),
   };
 
   return {
@@ -382,6 +384,7 @@ function buildFinished(actions: ViewActions): ViewHost {
   const title = h("div", { class: "title" });
   const row = h("div", { class: "actions" },
     btn("Open terminal", "primary", () => actions.openTerminal()),
+    btn("Open in VS Code", "secondary", () => actions.openVSCode()),
     btn("OK", "secondary", () => actions.collapse()),
   );
   const el = h("div", { class: "view" }, card("green", stack(116, 16, who, title, row)));

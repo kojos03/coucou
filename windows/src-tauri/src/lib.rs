@@ -5,6 +5,7 @@ mod files;
 mod hooks;
 mod integrations;
 mod island;
+mod launch;
 mod log;
 mod pipe;
 mod platform;
@@ -12,7 +13,6 @@ mod secrets;
 mod settings;
 mod tray;
 
-use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
@@ -20,7 +20,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
-use claude::{Chat, ChatContext, ChatReply};
+use claude::{Chat, ChatContext, ChatError, ChatReply};
 use files::DroppedFile;
 use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
@@ -132,37 +132,14 @@ fn open_url(url: String) {
     platform::open_url(&url);
 }
 
-/// "Open terminal" opens the working folder in VS Code when `code` is on PATH,
-/// and falls back to the file manager otherwise.
 #[tauri::command]
-fn open_in_vscode(path: Option<String>) -> bool {
-    // No shell anywhere near this. The path is a project folder chosen by
-    // whoever is using Claude Code, and a shell would happily read `&`, `^`, `%`
-    // or `$` in a folder name as syntax. Finding the launcher ourselves and
-    // handing the path over as a separate argument keeps it a path.
-    let path = path.filter(|p| !p.is_empty());
-    // It arrives in a hook payload: only an existing folder, given by its full
-    // path, goes any further. `code` would read `--something` as an option, and
-    // xdg-open would launch a file with whatever handles its type.
-    if let Some(p) = path.as_deref() {
-        let p = std::path::Path::new(p);
-        if !(p.is_absolute() && p.is_dir()) {
-            return false;
-        }
-    }
-    if let Some(code) = platform::find_on_path("code") {
-        let mut cmd = Command::new(code);
-        if let Some(p) = path.as_deref() {
-            cmd.arg(p);
-        }
-        if platform::no_console(&mut cmd).spawn().is_ok() {
-            return true;
-        }
-    }
-    if let Some(p) = path.as_deref() {
-        platform::reveal_folder(p);
-    }
-    false
+fn open_in_vscode(path: Option<String>) -> Result<(), String> {
+    launch::vscode(path.as_deref())
+}
+
+#[tauri::command]
+fn open_terminal(path: Option<String>) -> Result<(), String> {
+    launch::terminal(path.as_deref())
 }
 
 #[tauri::command]
@@ -240,7 +217,7 @@ async fn chat_send(
     chat: State<'_, Chat>,
     query: String,
     context: Option<ChatContext>,
-) -> Result<ChatReply, String> {
+) -> Result<ChatReply, ChatError> {
     let model = shared.settings.lock().unwrap().model.clone();
     claude::send(&chat, &model, query, context).await
 }
@@ -248,6 +225,11 @@ async fn chat_send(
 #[tauri::command]
 fn chat_reset(chat: State<Chat>) {
     chat.reset();
+}
+
+#[tauri::command]
+async fn chat_test_connection(model: String) -> Result<(), ChatError> {
+    claude::test_connection(&model).await
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -258,8 +240,8 @@ fn ingest_file(path: String) -> Result<DroppedFile, String> {
 
 /// The island may only ask whether a key exists — never read it.
 #[tauri::command]
-fn secret_present(key: String) -> bool {
-    secrets::present(&key)
+fn secret_present(key: String) -> Result<bool, String> {
+    secrets::read(&key).map(|value| value.is_some())
 }
 
 #[tauri::command]
@@ -354,8 +336,11 @@ pub fn show_settings_window(app: &AppHandle) {
 }
 
 #[tauri::command]
-fn open_settings_window(app: AppHandle) {
+fn open_settings_window(app: AppHandle, section: Option<String>) {
     show_settings_window(&app);
+    if section.as_deref() == Some("claude") {
+        let _ = app.emit_to("settings", "settings-section", "claude");
+    }
 }
 
 pub fn run() {
@@ -383,6 +368,7 @@ pub fn run() {
             reposition,
             open_url,
             open_in_vscode,
+            open_terminal,
             quit_app,
             hooks_status,
             hooks_preview,
@@ -393,6 +379,7 @@ pub fn run() {
             log_line,
             chat_send,
             chat_reset,
+            chat_test_connection,
             ingest_file,
             secret_present,
             secret_set,

@@ -18,34 +18,91 @@ pub const KNOWN_KEYS: &[&str] = &[
     "calcom-api-key",
 ];
 
-fn entry(key: &str) -> Option<Entry> {
+fn entry(key: &str) -> Result<Entry, String> {
     if !KNOWN_KEYS.contains(&key) {
-        return None;
+        return Err("Unknown credential name.".into());
     }
-    Entry::new(SERVICE, key).ok()
+    Entry::new(SERVICE, key).map_err(|_| "Could not open the credential store.".into())
 }
 
 pub fn get(key: &str) -> Option<String> {
-    entry(key)?.get_password().ok().filter(|v| !v.is_empty())
+    read(key).ok().flatten()
+}
+
+/// Distinguish an absent key from a locked or unavailable credential store.
+pub fn read(key: &str) -> Result<Option<String>, String> {
+    read_entry(&entry(key)?)
+}
+
+fn read_entry(entry: &Entry) -> Result<Option<String>, String> {
+    match entry.get_password() {
+        Ok(value) => Ok((!value.is_empty()).then_some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err("Could not read the credential store. Unlock it and try again.".into()),
+    }
 }
 
 pub fn set(key: &str, value: &str) -> Result<(), String> {
-    let entry = entry(key).ok_or_else(|| format!("unknown key {key}"))?;
+    write_entry(&entry(key)?, value)
+}
+
+fn write_entry(entry: &Entry, value: &str) -> Result<(), String> {
     if value.is_empty() {
-        let _ = entry.delete_credential();
-        return Ok(());
+        return clear_entry(entry);
     }
-    entry.set_password(value).map_err(|e| e.to_string())
+    entry.set_password(value).map_err(|_| "Could not save to the credential store.")?;
+    if read_entry(entry)?.as_deref() != Some(value) {
+        return Err("The saved key could not be verified. Try saving it again.".into());
+    }
+    Ok(())
 }
 
 pub fn clear(key: &str) -> Result<(), String> {
-    let entry = entry(key).ok_or_else(|| format!("unknown key {key}"))?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    clear_entry(&entry(key)?)
 }
 
-pub fn present(key: &str) -> bool {
-    get(key).is_some()
+fn clear_entry(entry: &Entry) -> Result<(), String> {
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(_) => return Err("Could not remove the key from the credential store.".into()),
+    }
+    if read_entry(entry)?.is_some() {
+        return Err("The key is still present. Try removing it again.".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_unknown_credential_names() {
+        assert!(read("not-a-coucou-key").is_err());
+        assert!(set("not-a-coucou-key", "test").is_err());
+        assert!(clear("not-a-coucou-key").is_err());
+    }
+
+    #[test]
+    #[ignore = "Uses an isolated native credential entry, never the user's API key"]
+    fn native_credential_round_trip() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let entry = Entry::new(&format!("fr.louisraille.coucou.test.{unique}"), "test-key").unwrap();
+        struct Cleanup(Entry);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = self.0.delete_credential(); }
+        }
+        let cleanup = Cleanup(entry);
+        let entry = &cleanup.0;
+        assert!(read_entry(entry).unwrap().is_none());
+        write_entry(entry, "non-secret-test-value").unwrap();
+        assert!(read_entry(entry).unwrap().as_deref() == Some("non-secret-test-value"));
+        write_entry(entry, "replacement-test-value").unwrap();
+        assert!(read_entry(entry).unwrap().as_deref() == Some("replacement-test-value"));
+        clear_entry(entry).unwrap();
+        assert!(read_entry(entry).unwrap().is_none());
+        clear_entry(entry).unwrap();
+        write_entry(entry, "").unwrap();
+    }
 }

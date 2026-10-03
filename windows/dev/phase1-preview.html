@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Coucou Phase 1 check</title></head>
+<body>
+<div id="settings-root"></div>
+<script type="module">
+  import { Bridge } from "../src/core/bridge.ts";
+  import { State } from "../src/core/state.ts";
+  Bridge.boot = async () => null;
+  Bridge.hooksStatus = async () => ({ installed: false, settingsPath: "", hookPath: "", hookReady: false });
+  Bridge.secretPresent = async () => false;
+  Bridge.openSettingsWindow = async () => { location.search = "?settings"; };
+  Bridge.chatSend = async () => { throw {
+    code: "missing_key", settings: true,
+    message: "Mochi chat needs an Anthropic API key. Add one in Chat settings. Your Codex sign-in does not set up this separate chat.",
+  }; };
+  if (location.search) {
+    document.body.className = "settings-window";
+    await import("../src/settings/main.ts");
+  } else {
+    await import("../src/style.css");
+    const { buildViews } = await import("../src/views/views.ts");
+    document.body.style.cssText = "background:#202126;overflow:auto;padding:30px;color:white";
+    document.getElementById("settings-root").remove();
+    const controls = document.createElement("div");
+    controls.style.cssText = "display:flex;gap:16px;margin-bottom:20px";
+    const stage = document.createElement("div");
+    stage.style.cssText = "position:relative;width:608px;height:188px";
+    document.body.append(controls, stage);
+    State.loadIntegrationTasks();
+    State.mode = "expanded";
+    State.view = "prompt";
+    const task = State.tasks.find(t => t.id === "agent_codex");
+    task.steps = ["Phase 1 check complete"];
+    task.state = "finished";
+    State.setFocus(task.id);
+    let current;
+    const actions = new Proxy({}, { get: () => () => {} });
+    const views = buildViews(actions, () => {});
+    State.subscribe(() => current?.sync());
+    for (const [label, key] of [["Chat error check", "prompt"], ["Finished card", "finished"]]) {
+      const button = document.createElement("button");
+      button.textContent = label;
+      button.onclick = () => {
+        current = views.get(key);
+        stage.replaceChildren(current.el);
+        current.el.classList.add("on");
+        stage.style.height = key === "finished" ? "100px" : "188px";
+        current.sync();
+      };
+      controls.append(button);
+    }
+    controls.firstElementChild.click();
+  }
+</script>
+</body></html>
