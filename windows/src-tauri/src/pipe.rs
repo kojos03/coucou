@@ -233,8 +233,15 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
 
     if event != "PermissionRequest" {
     log::line(format!("hook {event}"));
+    // A finished Codex turn has just written its plan windows to its log.
+    let codex_turn = payload.get("coucou_agent").and_then(Value::as_str) == Some("codex")
+        && matches!(event.as_str(), "Stop" | "StopFailure");
+    let session = payload.get("session_id").and_then(Value::as_str).map(str::to_string);
     let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
     pipe.finish();
+    if codex_turn {
+        tokio::task::spawn_blocking(move || crate::plan_usage::refresh_codex(&app, session.as_deref()));
+    }
     return;
 }
 

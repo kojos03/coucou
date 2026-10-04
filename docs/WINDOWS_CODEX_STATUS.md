@@ -559,6 +559,24 @@ on its own branch for a pull request into `windows-codex-claude`:
   with the diff. Turning the switch on without the status line opens the
   install diff; **Cancel** writes nothing.
 
+- **Usage on the cards** (asked for after the first review). Both the Claude
+  Code and the Codex card show a usage line under *Connected*: `5h ▬ 62%
+  week ▬ 35%`, coloured per window, with the reset times as a tooltip; a click
+  opens the plan card (with a back arrow). Without its status line, the Claude
+  card offers **Show plan usage…**, which opens that Settings section; the
+  header pill is now optional (**Pill in the header**). The Claude card's
+  status also reads *Connected* rather than *Connected · loading…*: it has
+  nothing to load.
+- **Codex usage.** Codex records its ChatGPT plan windows itself: every reply
+  in a session log carries a `token_count` event whose `rate_limits` has
+  `primary` (300 minutes) and `secondary` (10080 minutes), each with
+  `used_percent` and `resets_at`. `plan_usage::refresh_codex` reads the newest
+  logs of the last two days (and the finished chat's own log, found by its
+  thread id in the last 14 days), takes the latest reading by its timestamp,
+  keeps it in `codex-usage.json`, and sends it to the island — at launch and
+  after each Codex `Stop`. Windows go by their length, not their slot. No
+  request is made and nothing leaves the machine.
+
 Verified with the release build against a scratch home folder (never the
 real `~/.claude/settings.json`): the switch opened the install diff (only the
 `command` of an existing status line swapped, `padding` kept), **Back up and
@@ -569,9 +587,14 @@ island's pill and card showed the forwarded numbers (amber 62 %, then green
 exactly, deleted the saved copy and turned the pill off. With no saved status
 line the relay printed `5h 24% · week 41%` in about 90 ms, and Coucou stored
 only the two windows (no folder, cost or model). The same install and removal
-also pass as an ignored native test in a scratch folder. Not done: installing
-it for real, which writes the user's `~/.claude/settings.json` and needs
-their own click, and a real Claude Code reply feeding it.
+also pass as an ignored native test in a scratch folder. On the real machine,
+Coucou read the Codex numbers from the newest session log at launch (week
+92 %; the 5-hour window had already reset, so 0 %), and the Codex card showed
+them under *Connected*; the user has since installed the Claude status line
+themselves, and the Claude Code card showed *Plan usage after Claude Code's
+next reply*, then, fed one simulated status line (removed afterwards), the
+usage line, its tooltip and the plan card with its back arrow. Not yet seen: a
+real Claude Code reply feeding it, and a real Codex turn refreshing it.
 
 ## Where the implementation lives
 
@@ -593,7 +616,7 @@ their own click, and a real Claude Code reply feeding it.
 | [settings](../windows/src/settings/main.ts) and [hook installer](../windows/src-tauri/src/hooks.rs) | Settings window (hooks for both agents, both Mochis' sign-in and connection test) and Claude Code hook installation |
 | [pipe.rs](../windows/src-tauri/src/pipe.rs) and [relay](../windows/hook/src/main.rs) | Native transport and hook forwarding |
 | [plan_usage.rs](../windows/src-tauri/src/plan_usage.rs), [statusline.rs](../windows/hook/src/statusline.rs), [plan.ts](../windows/src/core/plan.ts) | Claude plan usage: status line relay and installer, gauge, header pill and card |
-| [plan-usage.test.mjs](../windows/tests/plan-usage.test.mjs) | 3 tests: gauge maths, header pill, plan card |
+| [plan-usage.test.mjs](../windows/tests/plan-usage.test.mjs) | 4 tests: gauge maths, header pill, plan card, usage lines on the Claude Code and Codex cards |
 | [hooks.test.mjs](../windows/tests/hooks.test.mjs) | 25 lifecycle, routing, pill and approval tests |
 | [codex-views.test.mjs](../windows/tests/codex-views.test.mjs) | 6 view tests: the Codex card, ticker, cards and settings badge |
 | [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 15 view tests: Phase 1, both Mochis and their sign-in choices, the Claude hand-off, and the Codex hooks section |

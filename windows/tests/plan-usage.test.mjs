@@ -102,6 +102,8 @@ test('the gauge picks the fuller window, colours it and labels it like macOS', (
 function islandFixture() {
   const cache = new Map();
   const calls = [];
+  const { Bridge } = load(resolve(root, 'core/bridge.ts'), cache);
+  Bridge.openSettingsWindow = async section => { calls.push(['settings', section]); };
   const { State } = load(resolve(root, 'core/state.ts'), cache);
   State.loadIntegrationTasks();
   const actions = new Proxy({}, { get: (_, name) => (...args) => calls.push([name, ...args]) });
@@ -142,7 +144,7 @@ test('the pill opens the plan card in place of the left card, and focus closes i
   f.sync();
   assert.match(f.overview.el.textContent, /Claude CodeIntegration/);
   f.pill().fire('click');
-  assert.equal(f.State.showingPlanDetail, true);
+  assert.equal(f.State.planDetail, 'claude');
   f.sync();
   const text = f.overview.el.textContent;
   assert.match(text, /Claude planjust now/);
@@ -156,7 +158,7 @@ test('the pill opens the plan card in place of the left card, and focus closes i
   // Picking a pill closes it, as on macOS.
   f.State.setFocus('agent_codex');
   f.sync();
-  assert.equal(f.State.showingPlanDetail, false);
+  assert.equal(f.State.planDetail, null);
   assert.doesNotMatch(f.overview.el.textContent, /Claude plan/);
   // Removing the status line takes the open card down with the pill.
   f.pill().fire('click');
@@ -164,6 +166,48 @@ test('the pill opens the plan card in place of the left card, and focus closes i
   assert.match(f.overview.el.textContent, /Claude plan/);
   f.State.planRelayInstalled = false;
   f.sync();
-  assert.equal(f.State.showingPlanDetail, false);
+  assert.equal(f.State.planDetail, null);
   assert.doesNotMatch(f.overview.el.textContent, /Claude plan/);
+});
+
+test('the Claude Code and Codex cards show their plan usage under the status', () => {
+  const f = islandFixture();
+  f.State.view = 'overview';
+  f.State.integrations.integration_claude = { data: {}, error: null, loaded: false, configured: true };
+  f.State.integrations.agent_codex = { data: { anyInstalled: true, app: true }, error: null, loaded: false, configured: true };
+  const usageRow = () => f.overview.el.all().find(el => el.className === 'int-usage');
+
+  // Without Claude Code's status line, the card says where to turn it on.
+  f.State.setFocus('integration_claude');
+  f.sync();
+  assert.match(f.overview.el.textContent, /ConnectedShow plan usage…/);
+  usageRow().all().find(el => el.tag === 'button').fire('click');
+  assert.deepEqual(f.calls.filter(c => c[0] === 'settings'), [['settings', 'plan']]);
+
+  f.State.planRelayInstalled = true;
+  f.sync();
+  assert.match(f.overview.el.textContent, /ConnectedPlan usage after Claude Code's next reply/);
+
+  f.State.planUsage = usage(62, 35);
+  f.sync();
+  assert.match(f.overview.el.textContent, /Connected5h62%week35%Open Claude app/);
+  assert.match(usageRow().attrs.title, /5 hours: 62%, resets in 1 h 20 · Week: 35%/);
+  // The line opens the full card, with a way back.
+  usageRow().fire('click');
+  assert.equal(f.State.planDetail, 'claude');
+  f.sync();
+  assert.match(f.overview.el.textContent, /Claude planjust now5 hours62%/);
+  f.overview.el.all().find(el => el.className === 'int-back').fire('click');
+  assert.equal(f.State.planDetail, null);
+
+  // Codex: nothing until it has written a reading, then the same line.
+  f.State.setFocus('agent_codex');
+  f.sync();
+  assert.equal(usageRow(), undefined);
+  f.State.codexUsage = usage(83, 92);
+  f.sync();
+  assert.match(f.overview.el.textContent, /Connected5h83%week92%/);
+  usageRow().fire('click');
+  f.sync();
+  assert.match(f.overview.el.textContent, /Codex planjust now5 hours83%/);
 });

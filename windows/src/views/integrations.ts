@@ -9,6 +9,7 @@ import { ICONS } from "./icons";
 import { State, type AgentTask } from "../core/state";
 import { Bridge } from "../core/bridge";
 import { refreshCodexHooks } from "../island/integrations";
+import { effectivePct, nowSeconds, planColor, resetLabel, type PlanUsage, type PlanWindow } from "../core/plan";
 
 /** Same shape as the Swift `timeAgo` computed properties. */
 export function timeAgo(value: unknown): string {
@@ -62,8 +63,60 @@ function codexStatus(configured: boolean, data: Record<string, unknown>): [strin
   return ["Hooks not installed", "#F4505E"];
 }
 
+/** One window on the usage line: `5h ▬▬ 62%`. */
+function miniGauge(label: string, w: PlanWindow | null, now: number): HTMLElement {
+  const el = h("span", { class: "g" }, h("span", { text: label }));
+  if (!w) {
+    el.append(h("b", { text: "—" }));
+    return el;
+  }
+  const pct = effectivePct(w, now);
+  const fill = h("i", {});
+  fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  fill.style.background = planColor(pct);
+  el.append(h("span", { class: "bar" }, fill), h("b", { text: `${Math.round(pct)}%` }));
+  return el;
+}
+
+function usageTitle(usage: PlanUsage, now: number): string {
+  const part = (name: string, w: PlanWindow | null, weekly: boolean) =>
+    w ? `${name}: ${Math.round(effectivePct(w, now))}%, resets ${resetLabel(w, weekly, now)}` : null;
+  return [part("5 hours", usage.fiveHour, false), part("Week", usage.sevenDay, true)]
+    .filter(Boolean)
+    .join(" · ") + " — click for details";
+}
+
+/**
+ * The plan line under the status on the Claude Code and Codex cards. Claude's
+ * numbers come from Claude Code's status line (set up in Settings); Codex's
+ * from its own session logs.
+ */
+function usageRow(kind: "claude" | "codex", openPlan?: (kind: "claude" | "codex") => void): HTMLElement | null {
+  const usage = State.usageFor(kind);
+  if (kind === "claude" && !State.planRelayInstalled) {
+    return h("div", { class: "int-usage" }, h("button", {
+      class: "link-btn",
+      style: "color:#8e939c",
+      text: "Show plan usage…",
+      onclick: () => void Bridge.openSettingsWindow("plan"),
+    }));
+  }
+  if (!usage) {
+    return kind === "claude"
+      ? h("div", { class: "int-usage", text: "Plan usage after Claude Code's next reply" })
+      : null;
+  }
+  const now = nowSeconds();
+  return h("button", {
+    class: "int-usage",
+    title: usageTitle(usage, now),
+    onclick: () => openPlan?.(kind),
+  }, miniGauge("5h", usage.fiveHour, now), miniGauge("week", usage.sevenDay, now));
+}
+
 function idleCard(
   task: AgentTask, openSettings: () => void, openVSCode: () => void, openClaudeApp?: () => void,
+  openPlan?: (kind: "claude" | "codex") => void,
 ): HTMLElement {
   const info = State.integrations[task.id];
   const configured = info?.configured ?? false;
@@ -77,7 +130,9 @@ function idleCard(
   const [codexLabel, codexColor] = codexStatus(configured, (info?.data ?? {}) as Record<string, unknown>);
   const label = error ?? (codex ? codexLabel
     : !configured ? missing
-    : vscode ? "Installed" : "Connected · loading…");
+    : vscode ? "Installed"
+    // Claude Code's card has nothing to load: the hooks are either in or not.
+    : task.id === "integration_claude" ? "Connected" : "Connected · loading…");
   const statusColor = error ? "#F4505E" : codex ? codexColor : configured ? "#22C55E" : "#F4505E";
 
   const actions = h("div", { class: "int-actions" });
@@ -157,6 +212,7 @@ function idleCard(
     { class: "int-card" },
     header(task.color, task.id === "integration_claude" ? "Claude Code" : codex ? "Codex" : task.name, "Integration"),
     h("div", { class: "int-status" }, dot(statusColor, 5), h("span", { text: label })),
+    task.id === "integration_claude" ? usageRow("claude", openPlan) : codex ? usageRow("codex", openPlan) : null,
     actions,
   );
 }
@@ -426,6 +482,8 @@ export interface IntegrationCardHooks {
   openSettings(): void;
   openVSCode(): void;
   openClaudeApp(): void;
+  /** The plan card for the usage line on the Claude Code or Codex card. */
+  openPlan?(kind: "claude" | "codex"): void;
 }
 
 /** True when this integration has data worth showing instead of the idle card. */
@@ -460,7 +518,9 @@ export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHoo
   if (task.id === "integration_vercel" && hasIntegrationData(task.id)) {
     return hooks.detailOpen ? vercelDetail(hooks.closeDetail) : vercelCard(hooks.openDetail);
   }
-  if (!hasIntegrationData(task.id)) return idleCard(task, hooks.openSettings, hooks.openVSCode, hooks.openClaudeApp);
+  if (!hasIntegrationData(task.id)) {
+    return idleCard(task, hooks.openSettings, hooks.openVSCode, hooks.openClaudeApp, hooks.openPlan);
+  }
 
   switch (task.id) {
     case "integration_resend":

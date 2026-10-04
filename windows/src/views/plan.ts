@@ -1,6 +1,6 @@
-// The Claude plan card: what the header pill opens in place of the left card.
-// Port of ClaudePlanCardView.swift (upstream #159), in the island's own
-// integration-card layout.
+// The plan card: what the header pill, or the usage line on the Claude Code or
+// Codex card, opens in place of the left card. Port of ClaudePlanCardView.swift
+// (upstream #159), in the island's own integration-card layout.
 
 import { h, svg, dot } from "./dom";
 import { ICONS } from "./icons";
@@ -27,14 +27,17 @@ function row(label: string, w: PlanWindow | null, weekly: boolean, now: number):
   return el;
 }
 
-export function renderPlanCard(usage: PlanUsage | null, now: number): HTMLElement {
+export function renderPlanCard(
+  kind: "claude" | "codex", usage: PlanUsage | null, now: number, onBack: () => void,
+): HTMLElement {
   return h(
     "div",
     { class: "int-card plan-card" },
     h("div", { class: "int-head" },
+      h("button", { class: "int-back", title: "Back", onclick: onBack }, svg(ICONS.chevronLeft, 10, { stroke: 2.4 })),
       dot(planColor(dominantPct(usage, now)), 7),
-      h("b", { text: "Claude plan" }),
-      h("span", { text: ageLabel(usage, now) }),
+      h("b", { text: kind === "claude" ? "Claude plan" : "Codex plan" }),
+      h("span", { text: ageLabel(usage, now, kind === "claude" ? "Claude Code" : "Codex") }),
     ),
     h("div", { class: "plan-rows" },
       row("5 hours", usage?.fiveHour ?? null, false, now),

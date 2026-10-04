@@ -201,6 +201,12 @@ fn plan_usage_latest() -> Option<plan_usage::PlanUsage> {
     plan_usage::latest()
 }
 
+/// Codex's plan windows, read from its own session logs.
+#[tauri::command]
+fn codex_usage_latest() -> Option<plan_usage::PlanUsage> {
+    plan_usage::codex_latest()
+}
+
 #[tauri::command]
 fn plan_relay_status() -> plan_usage::PlanRelayStatus {
     plan_usage::status()
@@ -495,7 +501,7 @@ pub fn show_settings_window(app: &AppHandle) {
 #[tauri::command]
 fn open_settings_window(app: AppHandle, section: Option<String>) {
     show_settings_window(&app);
-    if let Some(target @ ("claude" | "openai" | "codex")) = section.as_deref() {
+    if let Some(target @ ("claude" | "openai" | "codex" | "plan")) = section.as_deref() {
         let _ = app.emit_to("settings", "settings-section", target);
     }
 }
@@ -531,6 +537,7 @@ pub fn run() {
             hooks_preview,
             hooks_apply,
             plan_usage_latest,
+            codex_usage_latest,
             plan_relay_status,
             plan_relay_preview,
             plan_relay_apply,
@@ -580,6 +587,9 @@ pub fn run() {
 
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
+            // The newest Codex plan reading, before the first turn of this run.
+            let codex_usage = handle.clone();
+            std::thread::spawn(move || plan_usage::refresh_codex(&codex_usage, None));
             pipe::start(handle.clone());
             integrations::start(handle.clone());
             Ok(())

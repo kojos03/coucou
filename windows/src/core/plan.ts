@@ -1,6 +1,7 @@
-// Claude plan usage — the gauge maths behind the header pill and the plan card.
-// Port of ClaudePlanGauge.swift (upstream #159): the same colours, thresholds
-// and labels. Times are Unix seconds, as Claude Code sends them.
+// Plan usage — the gauge maths behind the header pill, the usage line on the
+// Claude Code and Codex cards, and the plan card. Port of ClaudePlanGauge.swift
+// (upstream #159): the same colours, thresholds and labels. Times are Unix
+// seconds, as Claude Code and Codex record them.
 
 export interface PlanWindow {
   /** 0–100. */
@@ -62,8 +63,8 @@ export function resetLabel(w: PlanWindow, weekly: boolean, now = nowSeconds()): 
 }
 
 /** The card's subtitle: how fresh the numbers are. */
-export function ageLabel(usage: PlanUsage | null, now = nowSeconds()): string {
-  if (!usage) return "Waiting for a Claude Code reply";
+export function ageLabel(usage: PlanUsage | null, now = nowSeconds(), agent = "Claude Code"): string {
+  if (!usage) return `Waiting for a ${agent} reply`;
   const diff = now - usage.updatedAt;
   if (diff < 60) return "just now";
   const mins = Math.floor(diff / 60);

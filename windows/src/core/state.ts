@@ -196,8 +196,14 @@ class AppState {
   /** Claude plan usage from Claude Code's status line, and whether its relay is in. */
   planUsage: PlanUsage | null = null;
   planRelayInstalled = false;
-  /** The plan card replaces the left card while open; any navigation closes it. */
-  showingPlanDetail = false;
+  /** Codex's plan usage, from its own session logs. */
+  codexUsage: PlanUsage | null = null;
+  /** Whose plan card replaces the left card; any navigation closes it. */
+  planDetail: "claude" | "codex" | null = null;
+
+  usageFor(kind: "claude" | "codex"): PlanUsage | null {
+    return kind === "claude" ? this.planUsage : this.codexUsage;
+  }
 
   lastActivity = performance.now();
 
@@ -247,7 +253,7 @@ class AppState {
     if (!t) return;
     this.focusId = id;
     t.pillBadge = null;
-    this.showingPlanDetail = false;
+    this.planDetail = null;
     this.notify();
   }
 

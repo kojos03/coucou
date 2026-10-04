@@ -102,7 +102,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
     title: "Claude plan usage",
     onclick: () => {
       actions.blip();
-      State.showingPlanDetail = !State.showingPlanDetail;
+      State.planDetail = State.planDetail === "claude" ? null : "claude";
       State.notify();
     },
   }, planDot, planLabel);
@@ -112,7 +112,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
 
   function paintPlanPill() {
     const color = planColor(dominantPct(State.planUsage));
-    const active = planHover || State.showingPlanDetail;
+    const active = planHover || State.planDetail === "claude";
     planDot.style.background = color;
     planPill.style.background = active ? `${color}2e` : "";
     planPill.style.borderColor = active ? `${color}8c` : `${color}24`;
@@ -180,12 +180,20 @@ function buildOverview(actions: ViewActions): ViewHost {
 
   // The plan card redraws when its numbers change, and every 30 s for the
   // countdowns and "N min ago", as on macOS.
-  const planKey = () => `plan~${JSON.stringify(State.planUsage)}~${Math.floor(nowSeconds() / 30)}`;
+  const planKey = () => {
+    const kind = State.planDetail;
+    return `plan~${kind}~${JSON.stringify(kind && State.usageFor(kind))}~${Math.floor(nowSeconds() / 30)}`;
+  };
   function showPlan() {
+    const kind = State.planDetail;
+    if (!kind) return;
     cardKey = planKey();
     mode = "plan";
     clear(leftBody);
-    leftBody.append(renderPlanCard(State.planUsage, nowSeconds()));
+    leftBody.append(renderPlanCard(kind, State.usageFor(kind), nowSeconds(), () => {
+      State.planDetail = null;
+      State.notify();
+    }));
   }
 
   const hooks: IntegrationCardHooks = {
@@ -205,6 +213,11 @@ function buildOverview(actions: ViewActions): ViewHost {
     openSettings: () => actions.openSettingsWindow(),
     openVSCode: () => actions.openVSCode(),
     openClaudeApp: () => actions.openClaudeApp(),
+    openPlan: (kind) => {
+      actions.blip();
+      State.planDetail = kind;
+      State.notify();
+    },
   };
 
   return {
@@ -234,11 +247,11 @@ function buildOverview(actions: ViewActions): ViewHost {
       : task.source === "agent"
   );
 
-      // Switched off or its status line removed: the card goes with the pill.
-      if (State.showingPlanDetail && !(State.settings.showPlanUsage && State.planRelayInstalled)) {
-        State.showingPlanDetail = false;
+      // Claude's status line removed: its numbers stop, and the card goes.
+      if (State.planDetail === "claude" && !State.planRelayInstalled) {
+        State.planDetail = null;
       }
-      if (State.showingPlanDetail) {
+      if (State.planDetail) {
         if (mode !== "plan" || planKey() !== cardKey) showPlan();
       } else if (task && sessionActive) {
         if (mode !== "ticker") {
@@ -272,6 +285,8 @@ function buildOverview(actions: ViewActions): ViewHost {
           task.id, detailOpen, task.state, task.steps.join("|"),
           info?.loaded, info?.error, info?.configured,
           JSON.stringify(info?.data ?? {}),
+          // The usage line on the Claude Code and Codex cards.
+          State.planRelayInstalled, JSON.stringify(State.planUsage), JSON.stringify(State.codexUsage),
         ].join("~");
         if (key !== cardKey) {
           cardKey = key;

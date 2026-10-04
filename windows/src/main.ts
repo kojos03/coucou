@@ -67,13 +67,19 @@ async function main() {
     State.planRelayInstalled = (await Bridge.planRelayStatus())?.installed ?? false;
     State.notify();
   };
-  State.planUsage = await Bridge.planUsage();
-  void refreshPlanRelay();
+  // Codex's come from its own session logs, read after each turn.
   await onEvent<PlanUsage>("plan-usage", (usage) => {
     State.planUsage = usage;
     State.notify();
   });
+  await onEvent<PlanUsage>("codex-usage", (usage) => {
+    State.codexUsage = usage;
+    State.notify();
+  });
   await onEvent<boolean>("plan-relay-changed", () => void refreshPlanRelay());
+  State.planUsage = (await Bridge.planUsage()) ?? State.planUsage;
+  State.codexUsage = (await Bridge.codexUsage()) ?? State.codexUsage;
+  void refreshPlanRelay();
 
   registerHookHandlers(island);
   registerIntegrationHandlers(island);

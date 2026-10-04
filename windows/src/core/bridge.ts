@@ -77,6 +77,8 @@ export const Bridge = {
   // ── Claude plan usage (Claude Code's status line) ─────────────────────────
   /** The latest 5-hour and weekly numbers, kept across restarts. */
   planUsage: () => call<PlanUsage>("plan_usage_latest"),
+  /** Codex's plan windows, read from its own session logs. */
+  codexUsage: () => call<PlanUsage>("codex_usage_latest"),
   planRelayStatus: () => call<PlanRelayStatus>("plan_relay_status"),
   /** Diff of the `statusLine` change; nothing is written. */
   planRelayPreview: (install: boolean) => callOrThrow<HookPreview>("plan_relay_preview", { install }),
@@ -143,7 +145,7 @@ export interface IntegrationUpdate {
 }
 
 /** Settings window sections that `openSettingsWindow` can scroll to. */
-export type SettingsSection = "claude" | "openai" | "codex";
+export type SettingsSection = "claude" | "openai" | "codex" | "plan";
 
 export function settingsSectionFor(provider: ChatProvider): SettingsSection {
   return provider === "openai" ? "openai" : "claude";

@@ -1149,6 +1149,56 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--dim-3);
 }
 
+/* The plan line on the Claude Code and Codex cards: `5h ▬▬ 62%  week ▬▬ 35%`. */
+.int-usage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0 0;
+  border: 0;
+  background: transparent;
+  font: 400 10px var(--font);
+  color: var(--dim-3);
+  text-align: left;
+  cursor: default;
+}
+
+button.int-usage:hover .g b {
+  color: var(--ink);
+}
+
+.int-usage .g {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.int-usage .g b {
+  font-weight: 600;
+  color: #c5c8cd;
+  font-variant-numeric: tabular-nums;
+}
+
+.int-usage .bar {
+  position: relative;
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.int-usage .bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+}
+
+.int-usage .link-btn {
+  font-size: 10px;
+  padding: 0;
+}
+
 /* Claude plan card: two gauge rows under the header, as on macOS. */
 .plan-rows {
   display: flex;

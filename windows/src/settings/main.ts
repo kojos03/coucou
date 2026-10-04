@@ -201,17 +201,17 @@ function planSection(initial: PlanRelayStatus): HTMLElement {
 
   function draw() {
     clear(head);
-    head.append(statusDot(status.installed && settings.showPlanUsage), h("span", { text: "Claude plan usage" }));
+    head.append(statusDot(status.installed), h("span", { text: "Claude plan usage" }));
     const line = status.installed
       ? status.kept ? `Installed · keeps running yours: ${status.kept}` : "Installed"
       : status.other ? `Not installed · yours: ${status.other}` : "Not installed";
     body.append(
       h("div", {
         class: "hint",
-        text: "Shows your Claude plan's 5-hour and weekly usage in the island's header. Coucou adds a status line to settings.json that passes these numbers on from Claude Code; Claude Code shows them on its status line too. A status line you already have keeps working as before. Pro and Max plans only.",
+        text: "Shows your Claude plan's 5-hour and weekly usage on the island's Claude Code card, and as a pill in its header if you like. Coucou adds a status line to settings.json that passes these numbers on from Claude Code; Claude Code shows them on its status line too. A status line you already have keeps working as before. Pro and Max plans only.",
       }),
       h("div", { class: "row" },
-        h("label", { text: "Show in the island" }),
+        h("label", { text: "Pill in the header" }),
         toggle(settings.showPlanUsage, (on) => void setShown(on)),
       ),
       h("div", { class: "row" },
@@ -894,13 +894,14 @@ async function main() {
     installed: false, settingsPath: "", hookReady: false, kept: null, other: null,
   };
 
+  const planEl = planSection(plan);
   const chats = [chatSection(CLAUDE_CHAT), chatSection(CODEX_CHAT)];
   const codexHooks = codexSection(codex);
   clear(root);
   root.append(
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
     claudeSection(status),
-    planSection(plan),
+    planEl,
     codexHooks,
     ...chats.map((chat) => chat.el),
     integrationsSection(present),
@@ -916,6 +917,8 @@ async function main() {
   void onEvent<SettingsSection>("settings-section", (target) => {
     // "Settings…" on the island's Codex card: the hooks.
     if (target === "codex") codexHooks.scrollIntoView({ block: "start" });
+    // "Show plan usage…" on the island's Claude Code card.
+    else if (target === "plan") planEl.scrollIntoView({ block: "start" });
     else chats[targets.findIndex((cfg) => cfg.target === target)]?.reveal();
   });
 

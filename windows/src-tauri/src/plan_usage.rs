@@ -12,7 +12,9 @@
 // This is Claude Code's own data about the plan; Coucou never touches the
 // Claude sign-in for it.
 
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -67,12 +69,15 @@ pub fn parse(payload: &Value, now: u64) -> Option<PlanUsage> {
 
 fn window(raw: Option<&Value>, now: u64) -> Option<PlanWindow> {
     let raw = raw?;
-    let pct = raw.get("used_percentage")?.as_f64()?;
-    // Slightly over 100 happens at the limit; far over is nonsense.
+    checked(raw.get("used_percentage")?.as_f64()?, raw.get("resets_at")?.as_f64()?, now)
+}
+
+/// One window, if its numbers make sense: a percentage (slightly over 100
+/// happens at the limit; far over is nonsense) and a reset time in seconds.
+fn checked(pct: f64, resets: f64, now: u64) -> Option<PlanWindow> {
     if !(0.0..=200.0).contains(&pct) {
         return None;
     }
-    let resets = raw.get("resets_at")?.as_f64()?;
     if !resets.is_finite() || resets <= 0.0 || resets > (now + MAX_AHEAD) as f64 {
         return None;
     }
@@ -102,6 +107,163 @@ pub fn record(app: &AppHandle, payload: &Value) {
         let _ = std::fs::write(usage_path(), text);
     }
     let _ = app.emit_to(WINDOW_LABEL, "plan-usage", usage);
+}
+
+// ── Codex ────────────────────────────────────────────────────────────────────
+//
+// Codex keeps its plan windows itself: every reply in a session log
+// ($CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl) carries a `token_count`
+// event whose `rate_limits` has `primary` (the 5-hour window) and `secondary`
+// (the week). Reading the newest one back costs nothing and sends nothing.
+
+static CODEX_LATEST: Mutex<Option<PlanUsage>> = Mutex::new(None);
+/// How much of a session log's end is searched for its last reading.
+const LOG_TAIL: u64 = 4 * 1024 * 1024;
+/// Day folders searched for the chat that just finished.
+const DAYS_BACK: usize = 14;
+
+fn codex_usage_path() -> PathBuf {
+    settings::local_dir().join("codex-usage.json")
+}
+
+/// The latest Codex numbers, from memory or from the last run.
+pub fn codex_latest() -> Option<PlanUsage> {
+    let mut latest = CODEX_LATEST.lock().unwrap();
+    if latest.is_none() {
+        *latest = std::fs::read(codex_usage_path())
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<PlanUsage>(&bytes).ok());
+    }
+    latest.clone()
+}
+
+/// Looks for a newer reading — at launch and after each Codex turn — and shows
+/// it. `session` is the chat that just finished, whose log may be days old.
+pub fn refresh_codex(app: &AppHandle, session: Option<&str>) {
+    let dir = crate::codex_hooks::hooks_path().with_file_name("sessions");
+    let Some(found) = newest_codex_reading(&dir, session, now()) else { return };
+    if codex_latest().is_some_and(|current| current.updated_at >= found.updated_at) {
+        return;
+    }
+    *CODEX_LATEST.lock().unwrap() = Some(found.clone());
+    if let Ok(text) = serde_json::to_vec(&found) {
+        let _ = std::fs::write(codex_usage_path(), text);
+    }
+    let _ = app.emit_to(WINDOW_LABEL, "codex-usage", found);
+}
+
+fn newest_codex_reading(dir: &Path, session: Option<&str>, now: u64) -> Option<PlanUsage> {
+    codex_logs(dir, session)
+        .iter()
+        .filter_map(|log| reading_in(log, now))
+        .max_by_key(|usage| usage.updated_at)
+}
+
+/// Sub-folders by name, newest first (the session tree is year/month/day).
+fn newest_first(dir: &Path, files: bool) -> Vec<PathBuf> {
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|it| it.filter_map(Result::ok).map(|e| e.path()).filter(|p| if files { p.is_file() } else { p.is_dir() }).collect())
+        .unwrap_or_default();
+    entries.sort();
+    entries.reverse();
+    entries
+}
+
+/// The newest logs of the last two days (a log's name starts with its creation
+/// time), and the finished chat's own log wherever it is.
+fn codex_logs(dir: &Path, session: Option<&str>) -> Vec<PathBuf> {
+    let mut days = Vec::new();
+    'outer: for year in newest_first(dir, false) {
+        for month in newest_first(&year, false) {
+            for day in newest_first(&month, false) {
+                days.push(day);
+                if days.len() >= DAYS_BACK {
+                    break 'outer;
+                }
+            }
+        }
+    }
+    let is_log = |p: &PathBuf| {
+        p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"))
+    };
+    let mut logs: Vec<PathBuf> = days
+        .iter()
+        .take(2)
+        .flat_map(|day| newest_first(day, true).into_iter().filter(is_log).take(6))
+        .collect();
+    if let Some(id) = session.filter(|id| !id.is_empty()) {
+        let suffix = format!("-{id}.jsonl");
+        let own = days.iter().find_map(|day| {
+            newest_first(day, true)
+                .into_iter()
+                .find(|p| is_log(p) && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(&suffix)))
+        });
+        logs.extend(own);
+    }
+    logs.sort();
+    logs.dedup();
+    logs
+}
+
+/// The last plan reading in one session log.
+fn reading_in(path: &Path, now: u64) -> Option<PlanUsage> {
+    let mut file = File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(LOG_TAIL))).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    text.lines().rev().filter(|line| line.contains("\"rate_limits\"")).find_map(|line| {
+        let record = serde_json::from_str::<Value>(line).ok()?;
+        let limits = record.get("payload")?.get("rate_limits")?;
+        let at = record.get("timestamp").and_then(Value::as_str).and_then(utc_seconds).unwrap_or(0);
+        parse_codex(limits, at, now)
+    })
+}
+
+/// Codex's `rate_limits`: each window goes by its length, so a plan whose
+/// primary window is the week still reads right.
+pub fn parse_codex(limits: &Value, at: u64, now: u64) -> Option<PlanUsage> {
+    let mut five_hour = None;
+    let mut seven_day = None;
+    for key in ["primary", "secondary"] {
+        let Some(raw) = limits.get(key).filter(|v| v.is_object()) else { continue };
+        let Some(w) = raw
+            .get("used_percent")
+            .and_then(Value::as_f64)
+            .zip(raw.get("resets_at").and_then(Value::as_f64))
+            .and_then(|(pct, resets)| checked(pct, resets, now))
+        else {
+            continue;
+        };
+        let weekly = match raw.get("window_minutes").and_then(Value::as_u64) {
+            Some(minutes) => minutes >= 24 * 60,
+            None => key == "secondary",
+        };
+        if weekly { seven_day.get_or_insert(w) } else { five_hour.get_or_insert(w) };
+    }
+    (five_hour.is_some() || seven_day.is_some()).then_some(PlanUsage { five_hour, seven_day, updated_at: at })
+}
+
+/// `2026-10-04T14:26:44.459Z` as Unix seconds (UTC only, as Codex writes it).
+fn utc_seconds(text: &str) -> Option<u64> {
+    let b = text.as_bytes();
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || !text.ends_with('Z') {
+        return None;
+    }
+    let num = |from: usize, to: usize| text.get(from..to)?.parse::<i64>().ok();
+    let (y, m, d) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
+    let (hh, mm, ss) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 60 {
+        return None;
+    }
+    // Days from 1970-01-01 to the date, in the proleptic Gregorian calendar.
+    let yy = if m <= 2 { y - 1 } else { y };
+    let era = yy.div_euclid(400);
+    let yoe = yy - era * 400;
+    let doy = (153 * ((m + 9) % 12) + 2) / 5 + d - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    u64::try_from(days * 86_400 + hh * 3600 + mm * 60 + ss).ok()
 }
 
 // ── Installer ────────────────────────────────────────────────────────────────
@@ -265,6 +427,53 @@ mod tests {
             "seven_day": { "used_percentage": 41, "resets_at": NOW + 10 },
         }}), NOW).unwrap();
         assert_eq!((one.five_hour, one.seven_day.map(|w| w.used_pct)), (None, Some(41.0)));
+    }
+
+    #[test]
+    fn codex_logs_give_their_last_plan_reading() {
+        let limits = json!({
+            "limit_id": "codex",
+            "primary": { "used_percent": 83.0, "window_minutes": 300, "resets_at": NOW + 3600 },
+            "secondary": { "used_percent": 92.0, "window_minutes": 10080, "resets_at": NOW + 86_400 },
+            "plan_type": "plus",
+        });
+        let usage = parse_codex(&limits, NOW - 5, NOW).unwrap();
+        assert_eq!(usage.five_hour.unwrap().used_pct, 83.0);
+        assert_eq!(usage.seven_day.unwrap().used_pct, 92.0);
+        assert_eq!(usage.updated_at, NOW - 5);
+        // Windows go by their length, not their slot.
+        let swapped = json!({ "primary": { "used_percent": 10, "window_minutes": 10080, "resets_at": NOW + 9 } });
+        let usage = parse_codex(&swapped, NOW, NOW).unwrap();
+        assert_eq!((usage.five_hour, usage.seven_day.map(|w| w.used_pct)), (None, Some(10.0)));
+        assert_eq!(parse_codex(&json!({ "primary": null, "secondary": null }), NOW, NOW), None);
+
+        assert_eq!(utc_seconds("2026-10-04T14:26:44.459Z"), Some(1_791_124_004));
+        assert_eq!(utc_seconds("2000-03-01T00:00:00Z"), Some(951_868_800));
+        assert_eq!(utc_seconds("2024-02-29T23:59:59Z"), Some(1_709_251_199));
+        assert_eq!(utc_seconds("2026-10-04 14:26:44"), None);
+
+        // The newest reading across logs wins; the finished chat's older log is
+        // searched too, and lines that are not readings are skipped.
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("coucou-codex-usage-{unique}"));
+        let line = |ts: &str, pct: f64| json!({ "timestamp": ts, "type": "event_msg", "payload": { "type": "token_count",
+            "rate_limits": { "primary": { "used_percent": pct, "window_minutes": 300, "resets_at": NOW + 60 } } } }).to_string();
+        let write = |day: &str, name: &str, lines: &[String]| {
+            let dir = root.join(day);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(name), lines.join("\n") + "\n").unwrap();
+        };
+        write("2026/10/04", "rollout-2026-10-04T10-00-00-aaa.jsonl", &[line("2026-10-04T10:00:00Z", 40.0), line("2026-10-04T10:05:00Z", 45.0)]);
+        write("2026/10/04", "rollout-2026-10-04T12-00-00-bbb.jsonl", &[line("2026-10-04T12:00:00Z", 50.0), r#"{"type":"event_msg","payload":{"text":"\"rate_limits\" said"}}"#.to_string()]);
+        write("2026/10/03", "rollout-2026-10-03T10-00-00-ccc.jsonl", &[line("2026-10-03T10:00:00Z", 30.0)]);
+        // Three days back: only searched as the finished chat's own log.
+        write("2026/09/20", "rollout-2026-09-20T09-00-00-old.jsonl", &[line("2026-10-04T13:00:00Z", 77.0)]);
+        let found = newest_codex_reading(&root, None, NOW).unwrap();
+        assert_eq!(found.five_hour.unwrap().used_pct, 50.0);
+        let found = newest_codex_reading(&root, Some("old"), NOW).unwrap();
+        assert_eq!(found.five_hour.unwrap().used_pct, 77.0);
+        assert_eq!(newest_codex_reading(&root.join("missing"), None, NOW), None);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
