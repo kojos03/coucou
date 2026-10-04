@@ -168,8 +168,24 @@ test('finished, error, question and approval cards name Codex, not Claude Code',
   const labels = approval.all().filter(el => el.tag === 'button').map(el => el.textContent);
   assert.deepEqual(labels, ['DenyN', 'AllowY']);
 
+  // A finished Codex chat opens back in the Codex app when it is installed…
+  const buttonsOf = el => el.all().filter(node => node.tag === 'button').map(node => node.textContent);
+  Object.assign(codex, { sessionId: '01a1068c-2c55-79b1-982a-22412894693c' });
+  f.State.integrations.agent_codex = hooksInfo(true, true, true);
+  const finished = f.view('finished');
+  assert.deepEqual(buttonsOf(finished), ['Open in Codex', 'Open in VS Code', 'OK']);
+  f.button(finished, 'Open in Codex').fire('click');
+  assert.deepEqual(f.calls.at(-1), ['openCodexChat']);
+  // …and in a terminal when it is not, or when there is no chat to open.
+  f.State.integrations.agent_codex = hooksInfo(true, true, false);
+  assert.deepEqual(buttonsOf(f.view('finished')), ['Open terminal', 'Open in VS Code', 'OK']);
+  f.State.integrations.agent_codex = hooksInfo(true, true, true);
+  Object.assign(codex, { sessionId: null });
+  assert.deepEqual(buttonsOf(f.view('finished')), ['Open terminal', 'Open in VS Code', 'OK']);
+
   f.State.setFocus('integration_claude');
   assert.match(f.view('finished').textContent, /Claude Code finished/);
+  assert.deepEqual(buttonsOf(f.view('finished')), ['Open terminal', 'Open in VS Code', 'OK']);
   assert.match(f.view('question').textContent, /Claude Code is asking a question/);
 });
 

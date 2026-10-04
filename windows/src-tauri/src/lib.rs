@@ -4,6 +4,7 @@ mod claude;
 mod claude_cli;
 mod codex_cli;
 mod codex_hooks;
+mod codex_review;
 mod files;
 mod hooks;
 mod integrations;
@@ -297,9 +298,13 @@ fn open_claude_code(question: String) -> Result<(), String> {
 }
 
 /// "Open Codex" on the Codex card: the Codex desktop app, when installed.
+/// "Open in Codex" on the finished card passes the chat's thread id.
 #[tauri::command]
-fn open_codex() -> Result<(), String> {
-    launch::codex_app()
+fn open_codex(thread: Option<String>) -> Result<(), String> {
+    match thread {
+        Some(thread) => launch::codex_thread(&thread),
+        None => launch::codex_app(),
+    }
 }
 
 #[tauri::command]

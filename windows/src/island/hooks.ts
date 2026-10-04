@@ -209,6 +209,7 @@ function showCodex(task: AgentTask, current: CodexSession | null, focused: boole
   task.steps = [...(current?.steps ?? [])];
   task.stepIndex = Math.max(0, task.steps.length - 1);
   task.sessionCwd = current?.cwd ?? null;
+  task.sessionId = current?.id || null;
   const asking = State.pendingApproval?.pillId === CODEX_ID;
   if (asking) task.state = "approval";
   task.pillBadge = focused ? null

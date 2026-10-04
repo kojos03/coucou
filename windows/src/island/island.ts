@@ -125,6 +125,9 @@ export class Island {
       openClaudeApp: () => {
         void Bridge.openClaudeApp().catch((err) => this.launchError(err));
       },
+      openCodexChat: () => {
+        void Bridge.openCodex(State.focusTask?.sessionId ?? null).catch((err) => this.launchError(err));
+      },
       // The ↗ button — same targets as openAgentTarget() on macOS.
       openTarget: () => {
         const task = State.focusTask;

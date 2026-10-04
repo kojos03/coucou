@@ -83,6 +83,8 @@ test('closing a completed chat preserves another working chat and its activity',
   assert.equal(f.task().state, 'working');
   assert.equal(f.task().steps.at(-1), 'B tool');
   assert.equal(f.task().sessionCwd, 'C:/b');
+  // "Open in Codex" follows the chat the pill shows.
+  assert.equal(f.task().sessionId, 'b');
   assert.equal(f.State.view, 'overview');
 });
 
@@ -382,6 +384,7 @@ test('the Codex pill keeps its name and settles like Claude Code after a turn', 
   assert.equal(f.task().steps.at(-1), 'Cherche · rg TODO src');
   f.send('Stop', 'a', 'a1', { cwd: 'C:/work/my-app', last_assistant_message: 'done' });
   assert.equal(f.task().state, 'finished');
+  assert.equal(f.task().sessionId, 'a');
   f.timers.forEach((callback) => callback());
   assert.equal(f.task().state, 'idle');
   assert.equal(f.task().steps.at(-1), 'done');
@@ -392,6 +395,7 @@ test('the Codex pill keeps its name and settles like Claude Code after a turn', 
   f.send('SessionEnd', 'a', undefined);
   assert.equal(f.task().name, 'Codex');
   assert.equal(f.task().sessionCwd, null);
+  assert.equal(f.task().sessionId, null);
   assert.equal(f.task().steps.length, 0);
 });
 

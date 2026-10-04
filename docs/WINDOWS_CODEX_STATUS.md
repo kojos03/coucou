@@ -485,6 +485,45 @@ At the user's request:
   same. No pill ID was renamed. On the development machine it replaced Resend
   in the four active integrations, as the user chose.
 
+### 12. Codex auto-review and Open in Codex (`windows-codex-claude`)
+
+Two reports from the first real Codex approval (4 October, 12:55):
+
+- **The island asked about a command the Codex chat was not asking about.**
+  The Codex app runs chats with `approval_policy = "on-request"` and
+  `approvals_reviewer = "auto_review"`: approvals go to Codex's own reviewer
+  agent, not to a person. Codex resolves an approval as *hooks first, then the
+  reviewer* (`Session::request_approval` in `codex-rs/core/src/tools/approvals.rs`),
+  so our PermissionRequest hook stood in front of the reviewer, showed a card
+  and held Codex until the click (9 s that time). The hook payload has no
+  reviewer field (`permission_mode` is `default` either way), but it names the
+  session transcript, whose `turn_context` records carry `approvals_reviewer`.
+  The relay used to drop `transcript_path` from every event; it now keeps it
+  for Codex PermissionRequests only, and Coucou removes it before the island
+  sees the request.
+  [codex_review.rs](../windows/src-tauri/src/codex_review.rs) reads that one
+  field (this turn's record, else the latest; at most the last 32 MB; `.jsonl`
+  only; nothing kept), and [pipe.rs](../windows/src-tauri/src/pipe.rs) closes a
+  Codex request at once when the reviewer is not `user`: the relay prints
+  nothing and Codex's reviewer decides, as without Coucou. A chat whose
+  approvals go to the user, or a transcript Coucou cannot read, still gets the
+  island's card.
+- **The finished card offered a terminal for a chat that lives in the Codex
+  app.** A finished Codex chat now offers **Open in Codex**, **Open in VS Code**
+  and **OK** when the Codex app is installed. **Open in Codex** opens that chat
+  through the app's own link, `codex://threads/<thread id>` (the `codex`
+  protocol is declared in the app's manifest; the hook's `session_id` is the
+  thread id). The id is checked to be hex and dashes before it reaches
+  `explorer.exe`. Without the app, or without a chat id, the card keeps **Open
+  terminal**. Claude Code's finished card is unchanged.
+
+Verified with the release build: a simulated Codex request carrying the real
+auto-review chat's transcript got no output in under 100 ms and no card
+(logged *left to Codex auto-review*); one whose transcript names `user` still
+got the card, which came down when the relay hung up; and clicking **Open in
+Codex** on a simulated finished turn switched the Codex app to that chat. Not
+yet seen: a real Codex chat after the change.
+
 ## Where the implementation lives
 
 | File | Responsibility |
@@ -586,11 +625,13 @@ Items 4 and 5 also cover the Codex lifecycle work.
 
 ## Recommended next change
 
-1. **Repair the Codex hooks and try a real approval.** In Settings → Codex,
-   **Repair hooks…** (adds PermissionRequest and Interrupt), then `/hooks` in
-   Codex to trust them. After the Codex usage limit resets (4 October), ask
-   Codex for something that needs approval and answer from the island, once
-   with Allow and once with Deny.
+1. **Try a real approval that Codex asks the user about.** The hooks are
+   repaired and trusted, and a real request was answered with Allow from the
+   island on 4 October, but that chat used auto-review, which Coucou now leaves
+   to Codex (section 12). Switch a Codex chat's approvals to the user, ask for
+   something that needs approval, and answer from the island once with Allow
+   and once with Deny; then confirm an auto-review chat runs without a card and
+   **Open in Codex** lands on the finished chat.
 2. **Finish the other live checks.** Ask Codex's Mochi a question, one needing
    web search, and one about a dropped image. Drop an image and a PDF on
    Claude's Mochi. Switch **Sign in with** by hand in Settings. Confirm a Claude

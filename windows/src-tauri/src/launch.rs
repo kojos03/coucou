@@ -177,6 +177,27 @@ pub fn codex_app() -> Result<(), String> {
     open_store_app(CODEX_APP, "App", "Codex")
 }
 
+/// A Codex thread id (a UUID): the only thing that goes into the deep link.
+fn is_codex_thread(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// "Open in Codex" on the finished card: the Codex app, at the chat that just
+/// finished. `codex://threads/<id>` is the app's own link to a chat.
+pub fn codex_thread(thread: &str) -> Result<(), String> {
+    if !is_codex_thread(thread) {
+        return Err("That Codex chat can't be opened.".into());
+    }
+    if !codex_app_installed() {
+        return Err("The Codex app isn't installed. Start Codex from a terminal with `codex`.".into());
+    }
+    Command::new("explorer.exe")
+        .arg(format!("codex://threads/{thread}"))
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "Could not open the Codex app.".into())
+}
+
 /// "Open Claude app" on the Claude Code card: the Claude desktop app, from the
 /// Microsoft Store package or the older per-user installer.
 pub fn claude_app() -> Result<(), String> {
@@ -198,6 +219,15 @@ pub fn vscode_installed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_thread_id_reaches_the_codex_link() {
+        assert!(is_codex_thread("01a1068c-2c55-79b1-982a-22412894693c"));
+        for bad in ["", "new", "../settings", "01a1068c?prompt=hi", "a".repeat(65).as_str(), "01a1068c 2c55"] {
+            assert!(!is_codex_thread(bad), "{bad}");
+        }
+        assert!(codex_thread("not a thread").is_err());
+    }
 
     #[test]
     fn rejects_missing_relative_and_non_directory_paths() {

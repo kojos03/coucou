@@ -20,6 +20,8 @@ export interface ViewActions {
   openVSCode(): void;
   /** The Claude desktop app, from the Claude Code pill. */
   openClaudeApp(): void;
+  /** The Codex app, at the chat the Codex pill shows. */
+  openCodexChat(): void;
   /** The ↗ button: opens whatever the focused pill points at. */
   openTarget(): void;
   openUrl(url: string): void;
@@ -390,11 +392,13 @@ function buildError(actions: ViewActions): ViewHost {
 function buildFinished(actions: ViewActions): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
-  const row = h("div", { class: "actions" },
-    btn("Open terminal", "primary", () => actions.openTerminal()),
-    btn("Open in VS Code", "secondary", () => actions.openVSCode()),
-    btn("OK", "secondary", () => actions.collapse()),
-  );
+  const terminal = btn("Open terminal", "primary", () => actions.openTerminal());
+  // A Codex chat that finished goes back to where it lives: the Codex app.
+  const codexChat = btn("Open in Codex", "primary", () => actions.openCodexChat());
+  const vscode = btn("Open in VS Code", "secondary", () => actions.openVSCode());
+  const ok = btn("OK", "secondary", () => actions.collapse());
+  let first = terminal;
+  const row = h("div", { class: "actions" }, first, vscode, ok);
   const el = h("div", { class: "view" }, card("green", stack(116, 16, who, title, row)));
   return {
     el,
@@ -406,6 +410,15 @@ function buildFinished(actions: ViewActions): ViewHost {
         : task?.source === "agent" ? `${agentLabel(task)} finished` : "Claude Code finished";
       who.append(agentWho(task, label));
       title.textContent = task?.steps.at(-1) ?? "Session finished";
+      const inCodex = task?.id === "agent_codex" && !!task.sessionId
+        && State.integrations.agent_codex?.data?.app === true;
+      // Swap only on a change, so a button under the pointer stays put.
+      const want = inCodex ? codexChat : terminal;
+      if (want !== first) {
+        first = want;
+        clear(row);
+        row.append(first, vscode, ok);
+      }
     },
   };
 }

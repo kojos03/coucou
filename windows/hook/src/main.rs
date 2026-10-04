@@ -115,6 +115,7 @@ fn read_event() -> Option<(String, String)> {
             }
         }
     }
+    let codex = agent == "codex";
     // Which agent this hook was installed for. Absent means Claude Code,
     // so existing hook commands keep working unchanged.
     if !agent.is_empty() {
@@ -128,9 +129,7 @@ fn read_event() -> Option<(String, String)> {
         .unwrap_or(arg_event);
     map.insert("hook_event_name".into(), serde_json::Value::String(event.clone()));
 
-    for field in DROPPED_FIELDS {
-        map.remove(*field);
-    }
+    drop_fields(map, codex && event == "PermissionRequest");
 
     let cwd_missing = map
         .get("cwd")
@@ -166,6 +165,17 @@ fn read_event() -> Option<(String, String)> {
     let mut line = payload.to_string();
     line.push('\n');
     Some((line, event))
+}
+
+/// Codex approvals keep the transcript path: Coucou reads from it whether the
+/// chat's approvals go to Codex's own auto-review, and drops it before the
+/// island sees the request.
+fn drop_fields(map: &mut serde_json::Map<String, serde_json::Value>, codex_approval: bool) {
+    for field in DROPPED_FIELDS {
+        if !(codex_approval && *field == "transcript_path") {
+            map.remove(*field);
+        }
+    }
 }
 
 /// Caps every string in the payload. A single Write can carry a whole file.
@@ -235,6 +245,17 @@ mod tests {
         );
         // "always" is an island concept; Claude Code just gets an allow.
         assert!(decision_json("always").unwrap().contains(r#""behavior":"allow""#));
+    }
+
+    #[test]
+    fn only_a_codex_approval_keeps_its_transcript_path() {
+        let full = || serde_json::json!({ "transcript_path": "C:/t.jsonl", "tool_response": "big", "cwd": "C:/" });
+        let mut codex = full();
+        drop_fields(codex.as_object_mut().unwrap(), true);
+        assert_eq!(codex, serde_json::json!({ "transcript_path": "C:/t.jsonl", "cwd": "C:/" }));
+        let mut other = full();
+        drop_fields(other.as_object_mut().unwrap(), false);
+        assert_eq!(other, serde_json::json!({ "cwd": "C:/" }));
     }
 
     #[test]

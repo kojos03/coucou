@@ -2,6 +2,8 @@ import type { BotStateName } from "../core/layout";
 import type { HookPayload } from "./hooks";
 
 export interface CodexSession {
+  /** The chat's thread id, which "Open in Codex" opens. */
+  id: string;
   turnId: string | undefined;
   state: BotStateName;
   steps: string[];
@@ -154,7 +156,7 @@ export class CodexSessions {
 
   private newTurn(payload: HookPayload, retiredTurns: Set<string>): CodexSession {
     return {
-      turnId: payload.turn_id, state: "thinking", steps: [], cwd: payload.cwd ?? "",
+      id: payload.session_id ?? "", turnId: payload.turn_id, state: "thinking", steps: [], cwd: payload.cwd ?? "",
       order: ++this.sequence, ended: false, promptSeen: false, retiredTurns,
     };
   }

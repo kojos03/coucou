@@ -52,6 +52,8 @@ export interface AgentTask {
   miniEye?: EyeShape | null;
   pillBadge?: PillBadge | null;
   sessionCwd?: string | null;
+  /** The chat the pill shows: for Codex, the thread "Open in Codex" opens. */
+  sessionId?: string | null;
 }
 
 export interface ApprovalInfo {

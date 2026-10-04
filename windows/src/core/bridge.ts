@@ -98,7 +98,8 @@ export const Bridge = {
   /** Opens the official Claude Code with the question, on the user's own Claude sign-in. */
   openClaudeCode: (question: string) => callOrThrow<void>("open_claude_code", { question }),
   /** "Open Codex": the Codex desktop app. */
-  openCodex: () => callOrThrow<void>("open_codex"),
+  /** The Codex app, at `thread` (a chat's id) when one is given. */
+  openCodex: (thread: string | null = null) => callOrThrow<void>("open_codex", { thread }),
   codexAppInstalled: () => call<boolean>("codex_app_installed"),
   /** "Open Claude app": the Claude desktop app. */
   openClaudeApp: () => callOrThrow<void>("open_claude_app"),

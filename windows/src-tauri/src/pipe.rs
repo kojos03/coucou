@@ -6,6 +6,10 @@
 // that keeps its connection open: it waits for the island's decision and writes
 // it back on the same connection, which is how approving from the island works.
 //
+// A Codex session whose approvals go to Codex's own reviewer (auto-review)
+// never asks a person, so its requests are not put on the island at all: the
+// connection closes at once and Codex carries on as if Coucou were not there.
+//
 // Claude Code is never blocked by us. Three things guarantee it:
 //   * coucou-hook gives the connection 300 ms and exits cleanly if we are closed;
 //   * we only wait for a human once the island has *confirmed* the card is on
@@ -228,6 +232,16 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
     return;
 }
 
+    if left_to_codex_review(&payload).await {
+        log::line("hook PermissionRequest left to Codex auto-review");
+        pipe.finish();
+        return;
+    }
+    // Only needed for that check; the island never sees transcript paths.
+    if let Some(map) = payload.as_object_mut() {
+        map.remove("transcript_path");
+    }
+
     let id = format!("{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<Reply>(4);
     {
@@ -267,6 +281,18 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
         let _ = pipe.flush().await;
     }
     pipe.finish();
+}
+
+/// A Codex request that Codex's reviewer agent will settle without a person.
+/// Reading the transcript is blocking file work, so it runs off the runtime.
+async fn left_to_codex_review(payload: &Value) -> bool {
+    if payload.get("coucou_agent").and_then(Value::as_str) != Some("codex") {
+        return false;
+    }
+    let payload = payload.clone();
+    tokio::task::spawn_blocking(move || crate::codex_review::auto_reviewed(&payload))
+        .await
+        .unwrap_or(false)
 }
 
 /// Resolves once the relay closes its end of the connection. It sends nothing

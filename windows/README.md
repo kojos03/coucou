@@ -102,12 +102,15 @@ in Codex and trust them. **Remove hooks…** takes out Coucou's entries only.
 
 The Codex pill then works like Claude Code's. While a chat runs, the ticker
 shows **Codex** with the project folder and each step; a finished turn opens
-**Codex finished** with **Open terminal** and **Open in VS Code**, then settles
-back to idle. When Codex asks for permission, the island shows the command or
+**Codex finished** with **Open in Codex** (that chat in the Codex app, when it is
+installed; **Open terminal** otherwise) and **Open in VS Code**, then settles
+back to idle. When Codex asks you for permission, the island shows the command or
 the files of a patch with **Deny** and **Allow** (there is no "Always": Codex
 doesn't accept one). Codex shows *Waiting for your answer in Coucou* meanwhile.
 If nobody clicks within 110 seconds, or Codex stops waiting first, the card goes
-away and Codex asks you itself. With no chat running, the pill shows whether the
+away and Codex asks you itself. Chats whose approvals go to Codex's auto-review
+(the Codex app's default) are left to it: the island only asks when Codex would
+ask you. With no chat running, the pill shows whether the
 hooks are installed and **Open Codex** when the Codex app is installed.
 
 ## Chat and keys
