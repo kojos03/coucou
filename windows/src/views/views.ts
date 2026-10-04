@@ -11,6 +11,8 @@ import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
+import { renderPlanCard } from "./plan";
+import { dominantPct, nowSeconds, pillLabel, planColor } from "../core/plan";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -92,6 +94,32 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
 
+  // Claude plan usage, home view only: a small pill that opens the plan card.
+  const planLabel = h("span", {});
+  const planDot = h("i", {});
+  const planPill = h("button", {
+    class: "plan-pill",
+    title: "Claude plan usage",
+    onclick: () => {
+      actions.blip();
+      State.showingPlanDetail = !State.showingPlanDetail;
+      State.notify();
+    },
+  }, planDot, planLabel);
+  let planHover = false;
+  planPill.addEventListener("mouseenter", () => { planHover = true; paintPlanPill(); });
+  planPill.addEventListener("mouseleave", () => { planHover = false; paintPlanPill(); });
+
+  function paintPlanPill() {
+    const color = planColor(dominantPct(State.planUsage));
+    const active = planHover || State.showingPlanDetail;
+    planDot.style.background = color;
+    planPill.style.background = active ? `${color}2e` : "";
+    planPill.style.borderColor = active ? `${color}8c` : `${color}24`;
+    planPill.style.color = active ? lighten(color, 0.3) : "";
+    planLabel.textContent = pillLabel(State.planUsage);
+  }
+
   function go(v: IslandViewName) {
     actions.blip();
     actions.setView(v);
@@ -101,7 +129,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
     "div",
     { id: "header" },
     h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
-    h("div", { class: "header-actions" }, gearBtn, soundBtn),
+    h("div", { class: "header-actions" }, planPill, gearBtn, soundBtn),
   );
 
   return {
@@ -116,6 +144,8 @@ export function buildHeader(actions: ViewActions): ViewHost {
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
       clear(soundBtn);
       soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
+      planPill.hidden = !(v === "overview" && State.settings.showPlanUsage && State.planRelayInstalled);
+      if (!planPill.hidden) paintPlanPill();
       el.style.opacity = v === "confused" ? "0" : "1";
     },
   };
@@ -145,8 +175,18 @@ function buildOverview(actions: ViewActions): ViewHost {
   let pillIds = "";
   let detailOpen = false;
   let lastFocus: string | null = null;
-  let mode: "ticker" | "card" | null = null;
+  let mode: "ticker" | "card" | "plan" | null = null;
   let cardKey = "";
+
+  // The plan card redraws when its numbers change, and every 30 s for the
+  // countdowns and "N min ago", as on macOS.
+  const planKey = () => `plan~${JSON.stringify(State.planUsage)}~${Math.floor(nowSeconds() / 30)}`;
+  function showPlan() {
+    cardKey = planKey();
+    mode = "plan";
+    clear(leftBody);
+    leftBody.append(renderPlanCard(State.planUsage, nowSeconds()));
+  }
 
   const hooks: IntegrationCardHooks = {
     get detailOpen() {
@@ -171,6 +211,7 @@ function buildOverview(actions: ViewActions): ViewHost {
     el,
     tick(nowMs: number) {
       if (mode === "ticker") ticker.tick(nowMs);
+      else if (mode === "plan" && planKey() !== cardKey) showPlan();
     },
     animating: () => mode === "ticker" && ticker.animating,
     sync() {
@@ -193,7 +234,13 @@ function buildOverview(actions: ViewActions): ViewHost {
       : task.source === "agent"
   );
 
-      if (task && sessionActive) {
+      // Switched off or its status line removed: the card goes with the pill.
+      if (State.showingPlanDetail && !(State.settings.showPlanUsage && State.planRelayInstalled)) {
+        State.showingPlanDetail = false;
+      }
+      if (State.showingPlanDetail) {
+        if (mode !== "plan" || planKey() !== cardKey) showPlan();
+      } else if (task && sessionActive) {
         if (mode !== "ticker") {
           clear(leftBody);
           leftBody.append(tickerBody);
@@ -234,7 +281,7 @@ function buildOverview(actions: ViewActions): ViewHost {
         }
       }
 
-      jump.style.display = detailOpen ? "none" : "";
+      jump.style.display = detailOpen || mode === "plan" ? "none" : "";
 
       const others = State.otherTasks.slice(0, 4);
       const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");

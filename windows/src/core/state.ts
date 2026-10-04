@@ -2,6 +2,7 @@
 
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
+import type { PlanUsage } from "./plan";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 /** Whose brain answers the chat: Codex's Mochi uses OpenAI, the others Anthropic. */
@@ -137,6 +138,8 @@ export interface Settings {
   openaiAuth: "codex" | "apiKey";
   /** Claude's Mochi signs in through Claude Code (Claude plan) or an API key. */
   anthropicAuth: "claudeCode" | "apiKey";
+  /** The Claude plan pill in the header (needs the status line relay). */
+  showPlanUsage: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -154,6 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   openaiModel: "gpt-6.1-sol",
   openaiAuth: "codex",
   anthropicAuth: "claudeCode",
+  showPlanUsage: false,
 };
 
 type Listener = () => void;
@@ -188,6 +192,12 @@ class AppState {
   pendingApproval: ApprovalInfo | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
+
+  /** Claude plan usage from Claude Code's status line, and whether its relay is in. */
+  planUsage: PlanUsage | null = null;
+  planRelayInstalled = false;
+  /** The plan card replaces the left card while open; any navigation closes it. */
+  showingPlanDetail = false;
 
   lastActivity = performance.now();
 
@@ -237,6 +247,7 @@ class AppState {
     if (!t) return;
     this.focusId = id;
     t.pillBadge = null;
+    this.showingPlanDetail = false;
     this.notify();
   }
 

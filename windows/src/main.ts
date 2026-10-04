@@ -4,6 +4,7 @@ import "./style.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
+import type { PlanUsage } from "./core/plan";
 import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
@@ -60,6 +61,19 @@ async function main() {
     State.loadIntegrationTasks();
     void refreshConfigured();
   });
+
+  // Claude plan usage: the last numbers seen, then each status line update.
+  const refreshPlanRelay = async () => {
+    State.planRelayInstalled = (await Bridge.planRelayStatus())?.installed ?? false;
+    State.notify();
+  };
+  State.planUsage = await Bridge.planUsage();
+  void refreshPlanRelay();
+  await onEvent<PlanUsage>("plan-usage", (usage) => {
+    State.planUsage = usage;
+    State.notify();
+  });
+  await onEvent<boolean>("plan-relay-changed", () => void refreshPlanRelay());
 
   registerHookHandlers(island);
   registerIntegrationHandlers(island);

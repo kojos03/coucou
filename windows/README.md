@@ -90,6 +90,24 @@ Integrations** (it counts towards the four integrations shown next to Mochi).
 Its card says whether VS Code's `code` launcher is installed and offers **Open
 Visual Studio Code**.
 
+### Claude plan usage
+
+With a Claude Pro or Max plan, Coucou can show how much of your 5-hour and weekly
+limits you have used. Turn on **Settings… → Claude plan usage → Show in the
+island**. The first time, it asks to add a status line to
+`%USERPROFILE%\.claude\settings.json` (the `statusLine` key only, with the same
+diff, dated backup and click as the hooks). Claude Code passes the plan numbers
+to that status line after each reply; the relay forwards them to Coucou and
+prints them on Claude Code's status line (`5h 23% · week 41%`). If you already
+had a status line, it keeps running in its place, and **Remove status line…**
+puts it back exactly.
+
+The island's home view then shows a small **Claude 73%** pill in its header,
+green under 50 %, amber to 80 %, red beyond. Click it for the card: both
+windows with their reset times. The numbers come from Claude Code's own status
+line data; Coucou never uses your Claude sign-in for them. Like the hooks, the
+status line expects Claude Code to run commands through Git Bash.
+
 ## Codex
 
 Open **Settings… → Codex**. It shows whether `%USERPROFILE%\.codex\hooks.json`

@@ -249,6 +249,34 @@ body {
   color: var(--ink);
 }
 
+/* Claude plan usage pill (home view): dot + "Claude 73%", like the agent pills. */
+.header-actions .plan-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  margin-right: -6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--card-flat);
+  color: var(--dim-3);
+  font: 600 10px var(--font);
+  white-space: nowrap;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.header-actions .plan-pill[hidden] {
+  display: none;
+}
+
+.plan-pill i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
 #views {
   position: relative;
   flex: 1 1 auto;
@@ -1119,6 +1147,56 @@ input[type="range"]::-webkit-slider-thumb {
   padding-top: 4px;
   font: 400 11px var(--font);
   color: var(--dim-3);
+}
+
+/* Claude plan card: two gauge rows under the header, as on macOS. */
+.plan-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 8px;
+}
+
+.plan-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 11px var(--font);
+  color: var(--dim-3);
+}
+
+.plan-label {
+  width: 44px;
+  flex: 0 0 auto;
+}
+
+.plan-bar {
+  position: relative;
+  width: 50px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.plan-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+}
+
+.plan-pct {
+  width: 30px;
+  text-align: right;
+  font-weight: 600;
+  color: #c5c8cd;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-reset {
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .int-actions {

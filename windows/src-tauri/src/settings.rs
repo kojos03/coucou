@@ -31,6 +31,9 @@ pub struct Settings {
     /// a Claude plan) or "apiKey" (an Anthropic API key in the credential store).
     #[serde(default = "default_anthropic_auth")]
     pub anthropic_auth: String,
+    /// The Claude plan pill in the island's header (needs the status line relay).
+    #[serde(default)]
+    pub show_plan_usage: bool,
 }
 
 fn default_model() -> String {
@@ -69,6 +72,7 @@ impl Default for Settings {
             openai_model: default_openai_model(),
             openai_auth: default_openai_auth(),
             anthropic_auth: default_anthropic_auth(),
+            show_plan_usage: false,
         }
     }
 }

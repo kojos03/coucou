@@ -68,7 +68,7 @@ pub fn settings_path() -> PathBuf {
 /// Everything else — a lock held by another process, a permission problem, JSON
 /// we cannot parse — is reported, because the alternative is treating somebody's
 /// unreadable settings as an empty object and then writing that back over them.
-fn read_settings() -> Result<Value, String> {
+pub(crate) fn read_settings() -> Result<Value, String> {
     let path = settings_path();
     match std::fs::read(&path) {
         Ok(bytes) => parse_settings(&bytes, &path.display().to_string()),
@@ -106,7 +106,7 @@ fn read_settings_lossy() -> Value {
 }
 
 #[cfg(windows)]
-fn hook_command(event: &str) -> String {
+pub(crate) fn hook_command(event: &str) -> String {
     let exe = settings::hook_exe_path().to_string_lossy().replace('\\', "/");
     format!("\"{exe}\" {event}")
 }
@@ -115,7 +115,7 @@ fn hook_command(event: &str) -> String {
 /// and `\` inside double quotes. Single quotes keep the path a path, whatever
 /// the home directory is called.
 #[cfg(unix)]
-fn hook_command(event: &str) -> String {
+pub(crate) fn hook_command(event: &str) -> String {
     format!("{} {event}", sh_quote(&settings::hook_exe_path().to_string_lossy()))
 }
 
@@ -265,42 +265,58 @@ pub fn status() -> HookStatus {
 pub fn preview(install: bool) -> Result<HookPreview, String> {
     let current = read_settings()?;
     let next = if install { merged(&current) } else { without_ours(&current) };
-    Ok(HookPreview {
-        diff: unified_diff(&pretty(&current), &pretty(&next)),
+    Ok(preview_of(&current, &next))
+}
+
+/// The diff from `current` to `next`, with the backup name and the fingerprint
+/// a later write must match. Shared with the status line installer.
+pub(crate) fn preview_of(current: &Value, next: &Value) -> HookPreview {
+    HookPreview {
+        diff: unified_diff(&pretty(current), &pretty(next)),
         backup: backup_path().to_string_lossy().to_string(),
         settings_path: settings_path().to_string_lossy().to_string(),
         fingerprint: current_fingerprint(),
-    })
+    }
 }
 
 /// Writes the merged (or cleaned) settings after taking a dated backup.
+pub fn write(install: bool, fingerprint: &str) -> Result<String, String> {
+    let current = read_unchanged(fingerprint)?;
+    let next = if install { merged(&current) } else { without_ours(&current) };
+    replace_settings(&next)
+}
+
+/// settings.json as it is now, provided it is still the file the user previewed.
 ///
 /// `fingerprint` is the one the preview was computed from. If the file changed
 /// in between — another tool, another window, the user's own editor — we stop
 /// and make them look at a fresh diff, because the only thing worse than not
 /// installing the hooks is silently reverting somebody else's edit.
-pub fn write(install: bool, fingerprint: &str) -> Result<String, String> {
-    let path = settings_path();
-    let dir = path.parent().unwrap_or(Path::new("."));
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-
+pub(crate) fn read_unchanged(fingerprint: &str) -> Result<Value, String> {
     // Read before the backup: an unreadable file must abort before we touch
     // anything at all.
     let current = read_settings()?;
     if current_fingerprint() != fingerprint {
         return Err(format!(
             "{} changed since the preview. Nothing was written — review the new diff.",
-            path.display()
+            settings_path().display()
         ));
     }
+    Ok(current)
+}
+
+/// Takes the dated backup, then replaces settings.json with `next` in one step.
+pub(crate) fn replace_settings(next: &Value) -> Result<String, String> {
+    let path = settings_path();
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
 
     let backup = backup_path();
     if path.exists() {
         std::fs::copy(&path, &backup).map_err(|e| format!("backup failed: {e}"))?;
     }
 
-    let next = if install { merged(&current) } else { without_ours(&current) };
-    let mut text = pretty(&next);
+    let mut text = pretty(next);
     text.push('\n');
 
     // A dotfiles setup often makes settings.json a symlink: write to the file it

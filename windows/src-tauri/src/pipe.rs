@@ -217,6 +217,12 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
     if !payload.is_object() {
         return;
     }
+    // The status line relay: Claude plan usage, not a session event.
+    if payload.get("coucou_kind").and_then(Value::as_str) == Some("statusline") {
+        crate::plan_usage::record(&app, &payload);
+        pipe.finish();
+        return;
+    }
     note_event(&payload);
 
     let event = payload

@@ -9,6 +9,7 @@ import {
   islandSize,
   type IslandMode, type IslandViewName,
 } from "../core/layout";
+import { dominantPct, planColor } from "../core/plan";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import { BotEngine, hexToRGB } from "../mochi/engine";
@@ -285,6 +286,7 @@ export class Island {
       void Bridge.focusWindow(false);
     }
     if (mode !== "expanded") {
+      State.showingPlanDetail = false;
       this.engine.resetMorph();
       // Nothing can be seen of the sequence once the island is shut, and leaving
       // it running would keep the frame loop awake — the island must cost
@@ -308,6 +310,7 @@ export class Island {
 
   expand(view: IslandViewName) {
     this.stopSequenceIfLeaving(view);
+    if (view !== State.view) State.showingPlanDetail = false;
     State.view = view;
     if (State.mode !== "expanded") this.setMode("expanded");
     else this.animateGeometry(false);
@@ -318,6 +321,7 @@ export class Island {
 
   setView(view: IslandViewName) {
     this.stopSequenceIfLeaving(view);
+    if (view !== State.view) State.showingPlanDetail = false;
     if (State.mode !== "expanded") {
       this.fsm.forceHome();
       State.view = view;
@@ -809,7 +813,10 @@ export class Island {
     if (!ctx) return;
 
     const focus = State.focusTask;
-    this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
+    // While the plan card is open, Mochi wears the plan's colour, as on macOS.
+    this.engine.bodyColor = State.showingPlanDetail && State.view === "overview"
+      ? hexToRGB(planColor(dominantPct(State.planUsage)))
+      : focus?.isIntegration ? hexToRGB(focus.color) : null;
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();

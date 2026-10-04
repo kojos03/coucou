@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { ChatProvider, Settings } from "./state";
+import type { PlanUsage } from "./plan";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -72,6 +73,19 @@ export const Bridge = {
    */
   hooksApply: (install: boolean, fingerprint: string) =>
     callOrThrow<string>("hooks_apply", { install, fingerprint }),
+
+  // ── Claude plan usage (Claude Code's status line) ─────────────────────────
+  /** The latest 5-hour and weekly numbers, kept across restarts. */
+  planUsage: () => call<PlanUsage>("plan_usage_latest"),
+  planRelayStatus: () => call<PlanRelayStatus>("plan_relay_status"),
+  /** Diff of the `statusLine` change; nothing is written. */
+  planRelayPreview: (install: boolean) => callOrThrow<HookPreview>("plan_relay_preview", { install }),
+  /**
+   * Writes the `statusLine` key — only after an explicit click, and only when
+   * settings.json still matches the preview. `show` turns the pill on with it.
+   */
+  planRelayApply: (install: boolean, fingerprint: string, show: boolean | null = null) =>
+    callOrThrow<string>("plan_relay_apply", { install, fingerprint, show }),
 
   // ── Codex hooks (~/.codex/hooks.json) ─────────────────────────────────────
   codexHooksStatus: () => call<CodexHookStatus>("codex_hooks_status"),
@@ -183,6 +197,16 @@ export interface CodexHookStatus {
   installed: boolean;
   anyInstalled: boolean;
   lastEvent: number | null;
+}
+
+export interface PlanRelayStatus {
+  installed: boolean;
+  settingsPath: string;
+  hookReady: boolean;
+  /** The user's own status line, which Coucou's keeps running. */
+  kept: string | null;
+  /** A status line that is not Coucou's, in settings.json now. */
+  other: string | null;
 }
 
 export interface HookPreview {

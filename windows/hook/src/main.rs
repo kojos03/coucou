@@ -14,7 +14,8 @@
 //!   island is the whole point. No answer means empty stdout, and Claude Code
 //!   asks in the terminal exactly as if Coucou were not installed.
 //!
-//! Usage: `coucou-hook <EventName>` (the name is also read from the JSON).
+//! Usage: `coucou-hook <EventName>` (the name is also read from the JSON), or
+//! `coucou-hook --statusline` as Claude Code's status line (see statusline.rs).
 
 use std::io::{Read, Write};
 use std::sync::mpsc;
@@ -44,7 +45,13 @@ mod unix;
 #[cfg(target_os = "linux")]
 use unix::connect;
 
+mod statusline;
+
 fn main() {
+    if std::env::args().skip(1).any(|arg| arg == "--statusline") {
+        statusline::run();
+        std::process::exit(0);
+    }
     let Some((payload, event)) = read_event() else { std::process::exit(0) };
 
     let waits_for_answer = event == "PermissionRequest";

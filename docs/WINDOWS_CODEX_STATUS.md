@@ -524,6 +524,55 @@ got the card, which came down when the relay hung up; and clicking **Open in
 Codex** on a simulated finished turn switched the Codex app to that chat. Not
 yet seen: a real Codex chat after the change.
 
+### 13. Claude plan usage (`windows-plan-usage`, upstream #159)
+
+The next port in [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md),
+on its own branch for a pull request into `windows-codex-claude`:
+
+- **Relay.** `coucou-hook --statusline` ([statusline.rs](../windows/hook/src/statusline.rs))
+  is Claude Code's status line command. It sends Coucou only `rate_limits` and
+  the session id, under the usual fire-and-forget budget, then prints the
+  status line: the user's own, if Coucou saved one beside the relay
+  (`statusline-previous.json`, run with the same stdin through Git Bash, or
+  PowerShell without it, as Claude Code would, 10 s at most), or else
+  `5h 23% · week 41%`. Upstream prints nothing in that case; a short line
+  seemed better than an empty status row.
+- **Coucou.** [plan_usage.rs](../windows/src-tauri/src/plan_usage.rs) validates
+  the windows as upstream does (percent 0–200 clamped to 100, reset times in
+  seconds and at most 400 days ahead), keeps the latest in memory and in
+  `%LOCALAPPDATA%\Coucou\plan-usage.json`, and sends it to the island. Its
+  installer writes the `statusLine` key through the hooks' own preview,
+  fingerprint, backup and atomic write (`preview_of`, `read_unchanged`,
+  `replace_settings`, split out of `hooks::write` without changing it).
+  Installing over a user's status line swaps only its `command` and saves the
+  original first; removing restores it exactly, or drops the key; a status
+  line that is not Coucou's is never removed.
+- **Island.** A small header pill on the home view, *Claude 73%*, coloured by
+  the fuller window (green < 50 %, amber < 80 %, red), shown when **Show in the
+  island** is on and the status line is installed. It opens the plan card in
+  place of the left card (both windows, bars, reset times, "just now"), Mochi
+  takes the plan colour meanwhile, and choosing a pill, another view or
+  closing the island closes it ([plan.ts](../windows/src/core/plan.ts),
+  [views/plan.ts](../windows/src/views/plan.ts)).
+- **Settings.** *Claude plan usage* under Claude Code: the switch, the status
+  line state (and the user's own one it keeps running), and Install / Remove
+  with the diff. Turning the switch on without the status line opens the
+  install diff; **Cancel** writes nothing.
+
+Verified with the release build against a scratch home folder (never the
+real `~/.claude/settings.json`): the switch opened the install diff (only the
+`command` of an existing status line swapped, `padding` kept), **Back up and
+write** saved the original beside the relay, and the status line command run
+through Git Bash exactly as installed printed the user's own line while the
+island's pill and card showed the forwarded numbers (amber 62 %, then green
+12 % with no weekly window); **Remove status line…** restored the file
+exactly, deleted the saved copy and turned the pill off. With no saved status
+line the relay printed `5h 24% · week 41%` in about 90 ms, and Coucou stored
+only the two windows (no folder, cost or model). The same install and removal
+also pass as an ignored native test in a scratch folder. Not done: installing
+it for real, which writes the user's `~/.claude/settings.json` and needs
+their own click, and a real Claude Code reply feeding it.
+
 ## Where the implementation lives
 
 | File | Responsibility |
@@ -543,6 +592,8 @@ yet seen: a real Codex chat after the change.
 | [chat.ts](../windows/src/views/chat.ts) | Chat per Mochi, errors, retry, and the Chat settings action |
 | [settings](../windows/src/settings/main.ts) and [hook installer](../windows/src-tauri/src/hooks.rs) | Settings window (hooks for both agents, both Mochis' sign-in and connection test) and Claude Code hook installation |
 | [pipe.rs](../windows/src-tauri/src/pipe.rs) and [relay](../windows/hook/src/main.rs) | Native transport and hook forwarding |
+| [plan_usage.rs](../windows/src-tauri/src/plan_usage.rs), [statusline.rs](../windows/hook/src/statusline.rs), [plan.ts](../windows/src/core/plan.ts) | Claude plan usage: status line relay and installer, gauge, header pill and card |
+| [plan-usage.test.mjs](../windows/tests/plan-usage.test.mjs) | 3 tests: gauge maths, header pill, plan card |
 | [hooks.test.mjs](../windows/tests/hooks.test.mjs) | 25 lifecycle, routing, pill and approval tests |
 | [codex-views.test.mjs](../windows/tests/codex-views.test.mjs) | 6 view tests: the Codex card, ticker, cards and settings badge |
 | [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 15 view tests: Phase 1, both Mochis and their sign-in choices, the Claude hand-off, and the Codex hooks section |
@@ -636,9 +687,11 @@ Items 4 and 5 also cover the Codex lifecycle work.
    web search, and one about a dropped image. Drop an image and a PDF on
    Claude's Mochi. Switch **Sign in with** by hand in Settings. Confirm a Claude
    Code session lights up the Claude Code pill next to a Codex session.
-3. **Continue the upstream ports** in the order of
-   [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md): Claude plan
-   usage next.
+3. **Review and merge the Claude plan usage pull request** (`windows-plan-usage`,
+   section 13), install its status line from Settings, then **continue the
+   upstream ports** in the order of
+   [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md): answering
+   Claude questions (#165) next.
 4. **Decide review items 1–3 and merge** `windows-codex-claude` (which
    contains `windows-phase1`) into `windows-codex` once the checks above pass.
 

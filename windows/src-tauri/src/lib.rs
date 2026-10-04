@@ -13,6 +13,7 @@ mod launch;
 mod log;
 mod openai;
 mod pipe;
+mod plan_usage;
 mod platform;
 mod secrets;
 mod settings;
@@ -191,6 +192,50 @@ fn hooks_apply(
         current.clone()
     };
     let _ = app.emit("settings-changed", updated);
+    Ok(backup)
+}
+
+/// The Claude plan pill: the latest numbers Claude Code's status line passed on.
+#[tauri::command]
+fn plan_usage_latest() -> Option<plan_usage::PlanUsage> {
+    plan_usage::latest()
+}
+
+#[tauri::command]
+fn plan_relay_status() -> plan_usage::PlanRelayStatus {
+    plan_usage::status()
+}
+
+/// The diff of the `statusLine` change, before anything is written.
+#[tauri::command]
+fn plan_relay_preview(install: bool) -> Result<HookPreview, String> {
+    plan_usage::preview(install)
+}
+
+/// Only ever called from an explicit click in the settings window. `show` turns
+/// the pill on with the relay (the switch that asked for it); removing the relay
+/// always turns it off.
+#[tauri::command]
+fn plan_relay_apply(
+    app: AppHandle,
+    shared: State<Shared>,
+    install: bool,
+    fingerprint: String,
+    show: Option<bool>,
+) -> Result<String, String> {
+    let backup = plan_usage::write(install, &fingerprint)?;
+    let updated = {
+        let mut current = shared.settings.lock().unwrap();
+        if !install {
+            current.show_plan_usage = false;
+        } else if let Some(show) = show {
+            current.show_plan_usage = show;
+        }
+        let _ = settings::save(&current);
+        current.clone()
+    };
+    let _ = app.emit("settings-changed", updated);
+    let _ = app.emit("plan-relay-changed", install);
     Ok(backup)
 }
 
@@ -485,6 +530,10 @@ pub fn run() {
             hooks_status,
             hooks_preview,
             hooks_apply,
+            plan_usage_latest,
+            plan_relay_status,
+            plan_relay_preview,
+            plan_relay_apply,
             approval_decision,
             approval_ack,
             approval_decline,
