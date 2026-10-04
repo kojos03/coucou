@@ -81,6 +81,15 @@ in time, Coucou stays quiet and Claude Code asks in the terminal as usual.
 
 It works from any terminal — Windows Terminal, PowerShell, VS Code, Git Bash.
 
+The **Claude Code** pill is Claude orange. With no session running, its card
+shows whether the hooks are installed and **Open Claude app**, which starts the
+Claude desktop app (the Microsoft Store version, or the older per-user install).
+
+**VS Code** is its own purple pill: switch it on in **Settings… →
+Integrations** (it counts towards the four integrations shown next to Mochi).
+Its card says whether VS Code's `code` launcher is installed and offers **Open
+Visual Studio Code**.
+
 ## Codex
 
 Open **Settings… → Codex**. It shows whether `%USERPROFILE%\.codex\hooks.json`
@@ -105,8 +114,8 @@ hooks are installed and **Open Codex** when the Codex app is installed.
 
 Coucou has two Mochis, shown as the **Claude Code** and **Codex** pills. The
 focused pill decides which one you chat with: with the Codex pill focused, Mochi
-is Codex light blue and answers through **OpenAI**; with any other pill, it is white
-and answers through **Anthropic**. Each Mochi keeps its own conversation, and
+is Codex light blue and answers through **OpenAI**; with any other pill, it is
+Claude orange and answers through **Anthropic**. Each Mochi keeps its own conversation, and
 dropping a file starts a new one with both.
 
 **Codex's Mochi** signs in one of two ways (**Settings… → Codex's Mochi ·

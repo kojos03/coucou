@@ -465,6 +465,26 @@ hooks…** in Settings, `/hooks` in Codex, and Codex usage, which resumes on
 clicking **Open Codex**; writing the real `hooks.json` from Settings (left for
 the user's click).
 
+### 11. Claude orange, Open Claude app, and a VS Code pill (`windows-codex-claude`)
+
+At the user's request:
+
+- The **Claude Code** pill and Claude's Mochi use Claude's orange, `#D97757`
+  (they were near-white).
+- Its idle card's link is **Open Claude app** instead of **Open Visual Studio
+  Code**, and its ↗ button does the same. [launch.rs](../windows/src-tauri/src/launch.rs)
+  starts the Store app (`Claude_pzs8sxrjxfjjc!Claude` through
+  `shell:AppsFolder`, found by its `%LOCALAPPDATA%\Packages` folder), or the
+  older per-user `%LOCALAPPDATA%\AnthropicClaude\claude.exe`. The finished
+  card keeps **Open in VS Code** for the session folder.
+- **VS Code** is a new integration pill, `integration_vscode`, purple
+  `#A855F7`. It is selectable in Settings → Integrations like the others (the
+  island shows four integrations at most), first in the list and in pill order.
+  Its card reads *VS Code · Integration*, *Installed* or *Not installed*
+  (whether `code` is on `PATH`), and **Open Visual Studio Code**; ↗ does the
+  same. No pill ID was renamed. On the development machine it replaced Resend
+  in the four active integrations, as the user chose.
+
 ## Where the implementation lives
 
 | File | Responsibility |

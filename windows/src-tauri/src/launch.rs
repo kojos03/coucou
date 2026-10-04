@@ -141,16 +141,32 @@ fn powershell(shell: &Path, cwd: &Path) -> Command {
     cmd
 }
 
-/// The Codex desktop app's Microsoft Store package family.
+/// The Codex and Claude desktop apps' Microsoft Store package families.
 const CODEX_APP: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+const CLAUDE_APP: &str = "Claude_pzs8sxrjxfjjc";
+
+fn local_app_data() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+}
 
 /// Windows keeps a data folder under %LOCALAPPDATA%\Packages for every Store
-/// app installed for the user, so its presence says the Codex app is there.
+/// app installed for the user, so its presence says the app is there.
+fn store_app_installed(family: &str) -> bool {
+    cfg!(windows) && local_app_data().is_some_and(|dir| dir.join("Packages").join(family).is_dir())
+}
+
+/// Starts a Store app. The shell: URI is built from constants only, so nothing
+/// from outside reaches it.
+fn open_store_app(family: &str, app: &str, name: &str) -> Result<(), String> {
+    Command::new("explorer.exe")
+        .arg(format!("shell:AppsFolder\\{family}!{app}"))
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| format!("Could not open the {name} app."))
+}
+
 pub fn codex_app_installed() -> bool {
-    cfg!(windows)
-        && std::env::var_os("LOCALAPPDATA")
-            .map(|dir| PathBuf::from(dir).join("Packages").join(CODEX_APP).is_dir())
-            .unwrap_or(false)
+    store_app_installed(CODEX_APP)
 }
 
 /// "Open Codex" on the Codex card, as on macOS: starts the Codex desktop app.
@@ -158,12 +174,25 @@ pub fn codex_app() -> Result<(), String> {
     if !codex_app_installed() {
         return Err("The Codex app isn't installed. Start Codex from a terminal with `codex`.".into());
     }
-    // A fixed shell: URI built from a constant, so nothing from outside reaches it.
-    Command::new("explorer.exe")
-        .arg(format!("shell:AppsFolder\\{CODEX_APP}!App"))
-        .spawn()
-        .map(|_| ())
-        .map_err(|_| "Could not open the Codex app.".to_string())
+    open_store_app(CODEX_APP, "App", "Codex")
+}
+
+/// "Open Claude app" on the Claude Code card: the Claude desktop app, from the
+/// Microsoft Store package or the older per-user installer.
+pub fn claude_app() -> Result<(), String> {
+    if store_app_installed(CLAUDE_APP) {
+        return open_store_app(CLAUDE_APP, "Claude", "Claude");
+    }
+    let legacy = local_app_data().map(|dir| dir.join("AnthropicClaude").join("claude.exe"));
+    match legacy.filter(|exe| cfg!(windows) && exe.is_file()) {
+        Some(exe) => Command::new(exe).spawn().map(|_| ()).map_err(|_| "Could not open the Claude app.".into()),
+        None => Err("The Claude app isn't installed. Download it from claude.ai/download.".into()),
+    }
+}
+
+/// The VS Code card's status: its command-line launcher is on PATH.
+pub fn vscode_installed() -> bool {
+    platform::find_on_path("code").is_some()
 }
 
 #[cfg(test)]

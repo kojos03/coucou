@@ -54,6 +54,8 @@ export async function refreshConfigured() {
     data: {}, error: null, loaded: false, configured: false,
   };
   State.integrations.integration_claude = { ...claude, configured: hooks };
+  const vscode = await Bridge.vscodeInstalled().catch(() => null);
+  State.integrations.integration_vscode = { data: {}, error: null, loaded: false, configured: vscode === true };
   State.notify();
   await refreshCodexHooks();
 }

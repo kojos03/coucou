@@ -588,9 +588,13 @@ interface IntegrationDef {
   color: string;
   /** Credential Manager keys, in the order they are shown. */
   fields: { key: string; label: string; placeholder: string; secret: boolean }[];
+  /** Shown instead of key fields when there is nothing to enter. */
+  hint?: string;
 }
 
 const INTEGRATIONS: IntegrationDef[] = [
+  { id: "integration_vscode", name: "VS Code", color: "#A855F7", fields: [],
+    hint: "No key needed. The pill opens Visual Studio Code; it uses the code command on PATH." },
   { id: "integration_stripe", name: "Stripe", color: "#0570DE",
     fields: [{ key: "stripe-api-key", label: "Secret key", placeholder: "sk_live_…", secret: true }] },
   { id: "integration_github", name: "GitHub", color: "#F4505E",
@@ -638,6 +642,7 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
     });
 
     const rows = h("div", { style: "display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0" });
+    if (def.hint) rows.append(h("div", { class: "hint", style: "padding-top:5px", text: def.hint }));
     for (const field of def.fields) {
       const input = h("input", {
         type: field.secret ? "password" : "text",

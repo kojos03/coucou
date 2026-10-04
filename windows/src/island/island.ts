@@ -122,6 +122,9 @@ export class Island {
         void Bridge.openInVSCode(State.focusTask?.sessionCwd ?? null)
           .catch((err) => this.launchError(err));
       },
+      openClaudeApp: () => {
+        void Bridge.openClaudeApp().catch((err) => this.launchError(err));
+      },
       // The ↗ button — same targets as openAgentTarget() on macOS.
       openTarget: () => {
         const task = State.focusTask;
@@ -134,7 +137,8 @@ export class Island {
           integration_notion: "https://notion.so",
           integration_calcom: "https://app.cal.com/bookings",
         };
-        if (task.id === "integration_claude") actions.openVSCode();
+        if (task.id === "integration_claude") actions.openClaudeApp();
+        else if (task.id === "integration_vscode") actions.openVSCode();
         else if (task.source === "agent") actions.openTerminal();
         else if (task.id === "integration_n8n") void Bridge.openN8n();
         else if (urls[task.id]) void Bridge.openUrl(urls[task.id]);

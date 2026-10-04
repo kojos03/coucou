@@ -100,6 +100,10 @@ export const Bridge = {
   /** "Open Codex": the Codex desktop app. */
   openCodex: () => callOrThrow<void>("open_codex"),
   codexAppInstalled: () => call<boolean>("codex_app_installed"),
+  /** "Open Claude app": the Claude desktop app. */
+  openClaudeApp: () => callOrThrow<void>("open_claude_app"),
+  /** Whether VS Code's `code` launcher is on PATH, for the VS Code card. */
+  vscodeInstalled: () => call<boolean>("vscode_installed"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */

@@ -307,6 +307,17 @@ fn codex_app_installed() -> bool {
     launch::codex_app_installed()
 }
 
+/// "Open Claude app" on the Claude Code card: the Claude desktop app.
+#[tauri::command]
+fn open_claude_app() -> Result<(), String> {
+    launch::claude_app()
+}
+
+#[tauri::command]
+fn vscode_installed() -> bool {
+    launch::vscode_installed()
+}
+
 #[tauri::command]
 fn codex_hooks_status() -> CodexHookStatus {
     codex_hooks::status()
@@ -479,6 +490,8 @@ pub fn run() {
             open_claude_code,
             open_codex,
             codex_app_installed,
+            open_claude_app,
+            vscode_installed,
             codex_hooks_status,
             codex_hooks_preview,
             codex_hooks_apply,

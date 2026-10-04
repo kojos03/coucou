@@ -62,16 +62,22 @@ function codexStatus(configured: boolean, data: Record<string, unknown>): [strin
   return ["Hooks not installed", "#F4505E"];
 }
 
-function idleCard(task: AgentTask, openSettings: () => void, openVSCode: () => void): HTMLElement {
+function idleCard(
+  task: AgentTask, openSettings: () => void, openVSCode: () => void, openClaudeApp?: () => void,
+): HTMLElement {
   const info = State.integrations[task.id];
   const configured = info?.configured ?? false;
   const error = info?.error ?? null;
   const codex = task.id === "agent_codex";
+  const vscode = task.id === "integration_vscode";
   // The Claude Code and Codex pills are about hooks, not a key — the macOS
-  // wording would be misleading here.
-  const missing = task.id === "integration_claude" ? "Hooks not installed" : "Key not configured";
+  // wording would be misleading here. VS Code needs neither.
+  const missing = task.id === "integration_claude" ? "Hooks not installed"
+    : vscode ? "Not installed" : "Key not configured";
   const [codexLabel, codexColor] = codexStatus(configured, (info?.data ?? {}) as Record<string, unknown>);
-  const label = error ?? (codex ? codexLabel : configured ? "Connected · loading…" : missing);
+  const label = error ?? (codex ? codexLabel
+    : !configured ? missing
+    : vscode ? "Installed" : "Connected · loading…");
   const statusColor = error ? "#F4505E" : codex ? codexColor : configured ? "#22C55E" : "#F4505E";
 
   const actions = h("div", { class: "int-actions" });
@@ -91,7 +97,16 @@ function idleCard(task: AgentTask, openSettings: () => void, openVSCode: () => v
     actions.append(
       h("button", {
         class: "link-btn",
-        style: `color:${task.color}b3`,
+        style: `color:${task.color}d9`,
+        text: "Open Claude app",
+        onclick: () => openClaudeApp?.(),
+      }),
+    );
+  } else if (vscode) {
+    actions.append(
+      h("button", {
+        class: "link-btn",
+        style: `color:${task.color}d9`,
         text: "Open Visual Studio Code",
         onclick: openVSCode,
       }),
@@ -115,7 +130,9 @@ function idleCard(task: AgentTask, openSettings: () => void, openVSCode: () => v
       }),
     );
   }
-  if (configured) {
+  if (vscode) {
+    // Nothing to configure or refresh: VS Code only has to be installed.
+  } else if (configured) {
     actions.append(
       h("button", {
         class: "link-btn",
@@ -408,6 +425,7 @@ export interface IntegrationCardHooks {
   closeDetail(): void;
   openSettings(): void;
   openVSCode(): void;
+  openClaudeApp(): void;
 }
 
 /** True when this integration has data worth showing instead of the idle card. */
@@ -442,7 +460,7 @@ export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHoo
   if (task.id === "integration_vercel" && hasIntegrationData(task.id)) {
     return hooks.detailOpen ? vercelDetail(hooks.closeDetail) : vercelCard(hooks.openDetail);
   }
-  if (!hasIntegrationData(task.id)) return idleCard(task, hooks.openSettings, hooks.openVSCode);
+  if (!hasIntegrationData(task.id)) return idleCard(task, hooks.openSettings, hooks.openVSCode, hooks.openClaudeApp);
 
   switch (task.id) {
     case "integration_resend":
@@ -456,7 +474,7 @@ export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHoo
     case "integration_calcom":
       return calcomCard();
     default:
-      return idleCard(task, hooks.openSettings, hooks.openVSCode);
+      return idleCard(task, hooks.openSettings, hooks.openVSCode, hooks.openClaudeApp);
   }
 }
 

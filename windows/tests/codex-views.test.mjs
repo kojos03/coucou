@@ -121,10 +121,10 @@ test('idle Codex shows an integration card like Claude Code, with its hooks and 
   f.State.integrations.agent_codex = hooksInfo(false, false, false);
   assert.match(f.view('overview').textContent, /Hooks not installed/);
 
-  // Claude Code's idle card is unchanged.
+  // Claude Code's idle card keeps its layout.
   f.State.setFocus('integration_claude');
   assert.match(f.view('overview').textContent, /Claude CodeIntegration/);
-  assert.match(f.view('overview').textContent, /Open Visual Studio Code/);
+  assert.match(f.view('overview').textContent, /Open Claude app/);
 });
 
 test('a Codex session reads "Codex · Integration" in the ticker; the pill keeps its name', () => {
@@ -208,4 +208,33 @@ test('queued ticker steps keep the island animating until they have scrolled in'
   overview.tick(1000);
   overview.tick(1000 + 400);
   assert.equal(overview.animating(), false);
+});
+
+test('Claude Code is orange and opens the Claude app; VS Code is its own purple integration', async () => {
+  const f = fixture();
+  assert.equal(f.task('integration_claude').color, '#D97757');
+  f.State.setFocus('integration_claude');
+  let card = f.view('overview');
+  assert.doesNotMatch(card.textContent, /Visual Studio Code/);
+  await f.button(card, 'Open Claude app').fire('click');
+  assert.deepEqual(f.calls.at(-1), ['openClaudeApp']);
+
+  // VS Code is a selectable integration, off until picked in Settings.
+  assert.equal(f.task('integration_vscode'), undefined);
+  f.State.settings.activeIntegrations = ['integration_github', 'integration_vscode', 'integration_n8n'];
+  f.State.loadIntegrationTasks();
+  assert.deepEqual(Array.from(f.State.tasks.slice(0, 3), t => t.id), ['integration_claude', 'agent_codex', 'integration_vscode']);
+  const vscode = f.task('integration_vscode');
+  assert.equal(vscode.color, '#A855F7');
+  f.State.integrations.integration_vscode = { data: {}, error: null, loaded: false, configured: true };
+  f.State.setFocus('integration_vscode');
+  card = f.view('overview');
+  assert.match(card.textContent, /VS CodeIntegration/);
+  assert.match(card.textContent, /Installed/);
+  assert.equal(f.button(card, 'Settings…'), undefined);
+  assert.equal(f.button(card, 'Refresh'), undefined);
+  await f.button(card, 'Open Visual Studio Code').fire('click');
+  assert.deepEqual(f.calls.at(-1), ['openVSCode']);
+  f.State.integrations.integration_vscode = { data: {}, error: null, loaded: false, configured: false };
+  assert.match(f.view('overview').textContent, /Not installed/);
 });

@@ -18,6 +18,8 @@ export interface ViewActions {
   setFocus(id: string): void;
   openTerminal(): void;
   openVSCode(): void;
+  /** The Claude desktop app, from the Claude Code pill. */
+  openClaudeApp(): void;
   /** The ↗ button: opens whatever the focused pill points at. */
   openTarget(): void;
   openUrl(url: string): void;
@@ -160,6 +162,7 @@ function buildOverview(actions: ViewActions): ViewHost {
     },
     openSettings: () => actions.openSettingsWindow(),
     openVSCode: () => actions.openVSCode(),
+    openClaudeApp: () => actions.openClaudeApp(),
   };
 
   return {
