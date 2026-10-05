@@ -15,6 +15,14 @@ Approve Claude Code permissions, watch your session work, drop a file, chat with
 
 </div>
 
+## Windows Codex fork
+
+The `windows-codex` branch of [kojos03/coucou](https://github.com/kojos03/coucou/tree/windows-codex)
+contains the Windows Codex activity and completion work. See the
+[progress report and next phases](../docs/WINDOWS_CODEX_STATUS.md) for completed
+changes, verification results, known limitations, and the collaborator workflow.
+Codex hook setup is currently manual; Mochi chat uses a separate Anthropic API key.
+
 <img src="screenshots/greeting.png" width="640" alt="Mochi waving hello at launch">
 
 ---
