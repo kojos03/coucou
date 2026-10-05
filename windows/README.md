@@ -90,30 +90,34 @@ Integrations** (it counts towards the four integrations shown next to Mochi).
 Its card says whether VS Code's `code` launcher is installed and offers **Open
 Visual Studio Code**.
 
-### Claude plan usage
+### Plan usage and internet speed
 
-With a Claude Pro or Max plan, Coucou can show how much of your 5-hour and weekly
-limits you have used, on the **Claude Code** card under *Connected*
-(`5h ▬ 62%  week ▬ 35%`; click it for the reset times). Click **Show plan
-usage…** there, or open **Settings… → Claude plan usage → Install status
-line…**. It asks to add a status line to
-`%USERPROFILE%\.claude\settings.json` (the `statusLine` key only, with the same
-diff, dated backup and click as the hooks). Claude Code passes the plan numbers
-to that status line after each reply; the relay forwards them to Coucou and
-prints them on Claude Code's status line (`5h 23% · week 41%`). If you already
-had a status line, it keeps running in its place, and **Remove status line…**
-puts it back exactly.
+The **Claude Code** card shows how much of your Claude plan's 5-hour and weekly
+limits you have used, under *Connected* (`5h ▬ 62%  week ▬ 35%`; at a limit,
+*Weekly limit reached · resets Fri 9:00*). Click it for the reset times. It is
+one pool for Claude Code, Cowork and the Claude apps, so the same line covers
+all of them. While the card is open, Coucou asks Claude Code for the numbers when
+they are more than ten minutes old: one tiny request (Haiku, about 400 tokens),
+and **Refresh** asks at once. Chats with Claude's Mochi bring them along for
+free. Coucou never reads your Claude sign-in.
 
-Each bar is green under 50 %, amber to 80 %, red beyond. **Pill in the header**
-also puts a small **Claude 73%** pill in the island's header on the home view.
-The numbers come from Claude Code's own status line data; Coucou never uses
-your Claude sign-in for them. Like the hooks, the status line expects Claude
-Code to run commands through Git Bash.
+Optionally, **Settings… → Claude plan usage → Install status line…** adds a
+status line to `%USERPROFILE%\.claude\settings.json` (the `statusLine` key
+only, with the same diff, dated backup and click as the hooks): Claude Code then
+passes the numbers on after each reply in a terminal, at no cost, and prints
+them on its status line (`5h 23% · week 41%`). A status line you already had
+keeps running in its place, and **Remove status line…** puts it back exactly.
+Like the hooks, it expects Claude Code to run commands through Git Bash.
 
-The **Codex** card shows the same line for your ChatGPT plan's Codex limits.
-There is nothing to set up: Codex writes its 5-hour and weekly numbers into its
-own session logs (`%USERPROFILE%\.codex\sessions`), and Coucou reads the
-newest one at launch and after each Codex turn — no request goes out.
+The **Codex** card shows the same line for your ChatGPT plan's Codex limits,
+straight from Codex (`codex app-server`, the read the Codex app makes for its
+own usage view — no model call): at launch, after each Codex turn, and while the
+card is open (at most once a minute). Without the Codex CLI, it falls back to the
+numbers Codex writes in its session logs.
+
+The island's header shows your internet speed right now — `↓ 18 Mbps ↑ 1.1 Mbps`
+— from your network adapters' own counters, once a second while the island is
+on screen. Nothing is downloaded to measure it.
 
 ## Codex
 

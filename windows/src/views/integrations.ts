@@ -86,32 +86,37 @@ function usageTitle(usage: PlanUsage, now: number): string {
     .join(" · ") + " — click for details";
 }
 
+/** The window that is full, when the plan has stopped answering. */
+function fullWindow(usage: PlanUsage, now: number): ["5-hour" | "Weekly", PlanWindow, boolean] | null {
+  const full = (w: PlanWindow | null) => w != null && effectivePct(w, now) >= 100;
+  if (full(usage.sevenDay)) return ["Weekly", usage.sevenDay!, true];
+  if (full(usage.fiveHour)) return ["5-hour", usage.fiveHour!, false];
+  if (!usage.limitReached) return null;
+  // Refused, but no window reads 100 %: name the fuller one.
+  const week = usage.sevenDay ? effectivePct(usage.sevenDay, now) : -1;
+  const five = usage.fiveHour ? effectivePct(usage.fiveHour, now) : -1;
+  if (week < 0 && five < 0) return null;
+  return week >= five ? ["Weekly", usage.sevenDay!, true] : ["5-hour", usage.fiveHour!, false];
+}
+
 /**
- * The plan line under the status on the Claude Code and Codex cards. Claude's
- * numbers come from Claude Code's status line (set up in Settings); Codex's
- * from its own session logs.
+ * The plan line under the status on the Claude Code and Codex cards:
+ * `5h ▬ 62%  week ▬ 35%`, or, at the limit, which one and when it resets.
+ * Claude's numbers are one pool for Claude Code, Cowork and the Claude apps.
  */
-function usageRow(kind: "claude" | "codex", openPlan?: (kind: "claude" | "codex") => void): HTMLElement | null {
+function usageRow(kind: "claude" | "codex", openPlan?: (kind: "claude" | "codex") => void): HTMLElement {
   const usage = State.usageFor(kind);
-  if (kind === "claude" && !State.planRelayInstalled) {
-    return h("div", { class: "int-usage" }, h("button", {
-      class: "link-btn",
-      style: "color:#8e939c",
-      text: "Show plan usage…",
-      onclick: () => void Bridge.openSettingsWindow("plan"),
-    }));
-  }
-  if (!usage) {
-    return kind === "claude"
-      ? h("div", { class: "int-usage", text: "Plan usage after Claude Code's next reply" })
-      : null;
-  }
+  if (!usage) return h("div", { class: "int-usage", text: "Checking plan usage…" });
   const now = nowSeconds();
+  const full = fullWindow(usage, now);
+  const content = full
+    ? [h("span", { class: "full", text: `${full[0]} limit reached · resets ${resetLabel(full[1], full[2], now)}` })]
+    : [miniGauge("5h", usage.fiveHour, now), miniGauge("week", usage.sevenDay, now)];
   return h("button", {
     class: "int-usage",
     title: usageTitle(usage, now),
     onclick: () => openPlan?.(kind),
-  }, miniGauge("5h", usage.fiveHour, now), miniGauge("week", usage.sevenDay, now));
+  }, ...content);
 }
 
 function idleCard(
@@ -193,7 +198,12 @@ function idleCard(
         class: "link-btn",
         style: `color:${task.color}d9`,
         text: "Refresh",
-        onclick: () => void (codex ? refreshCodexHooks() : Bridge.refreshIntegration(task.id)),
+        onclick: () => {
+          if (codex) void refreshCodexHooks();
+          else void Bridge.refreshIntegration(task.id);
+          // The plan line too, right away.
+          if (codex || task.id === "integration_claude") void Bridge.usageRefresh(codex ? "codex" : "claude", true);
+        },
       }),
     );
   } else {

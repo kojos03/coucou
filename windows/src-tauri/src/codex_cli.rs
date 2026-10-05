@@ -320,9 +320,105 @@ fn login_status(codex: &Path) -> Result<(), ChatError> {
     }
 }
 
+/// How long Codex gets to answer a usage read; it normally takes about a second.
+const USAGE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The JSON lines that ask `codex app-server` for the account's usage: the
+/// handshake, then `account/rateLimits/read`.
+pub(crate) fn usage_requests() -> String {
+    [
+        json!({ "method": "initialize", "id": 1, "params": { "clientInfo": {
+            "name": "coucou", "title": "Coucou", "version": env!("CARGO_PKG_VERSION") } } }),
+        json!({ "method": "initialized" }),
+        json!({ "method": "account/rateLimits/read", "id": 2 }),
+    ]
+    .iter()
+    .map(|line| format!("{line}\n"))
+    .collect()
+}
+
+/// The `rateLimits` of the usage read's answer, among everything the server said.
+pub(crate) fn usage_answer(output: &str) -> Option<Value> {
+    output
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .find(|message| message["id"] == 2)
+        .and_then(|answer| answer.get("result")?.get("rateLimits").cloned())
+}
+
+/// Codex's plan usage as the Codex app shows it, from Codex itself:
+/// `codex app-server` answering `account/rateLimits/read`. No model call is
+/// made and nothing counts against the plan; Coucou never sees the sign-in.
+pub(crate) fn rate_limits() -> Option<Value> {
+    let codex = codex().ok()?;
+    let mut cmd = Command::new(codex);
+    cmd.arg("app-server").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    platform::no_console(&mut cmd);
+    let mut child = cmd.spawn().ok()?;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    if let Some(stdout) = child.stdout.take() {
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(usage_requests().as_bytes());
+        let _ = stdin.flush();
+        // Kept open until the answer is in: the server stops when stdin closes.
+        let deadline = Instant::now() + USAGE_TIMEOUT;
+        let answer = loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(line) => {
+                    if let Some(limits) = usage_answer(&line) {
+                        break Some(limits);
+                    }
+                    if serde_json::from_str::<Value>(&line).is_ok_and(|m| m["id"] == 2) {
+                        break None;
+                    }
+                }
+                Err(_) => break None,
+            }
+        };
+        drop(stdin);
+        kill_tree(&mut child);
+        return answer;
+    }
+    kill_tree(&mut child);
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_usage_read_is_the_documented_handshake_and_its_answer_is_found() {
+        let lines: Vec<Value> = usage_requests().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(lines[0]["method"], "initialize");
+        assert_eq!(lines[0]["params"]["clientInfo"]["name"], "coucou");
+        assert_eq!(lines[1], json!({ "method": "initialized" }));
+        assert_eq!(lines[2], json!({ "method": "account/rateLimits/read", "id": 2 }));
+        let output = concat!(
+            r#"{"id":1,"result":{"userAgent":"coucou"}}"#, "\n",
+            r#"{"method":"account/rateLimits/updated","params":{}}"#, "\n",
+            r#"{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":13,"windowDurationMins":300,"resetsAt":1791227895}}}}"#, "\n",
+        );
+        assert_eq!(usage_answer(output).unwrap()["primary"]["usedPercent"], 13);
+        assert_eq!(usage_answer(r#"{"id":2,"error":{"message":"not signed in"}}"#), None);
+    }
+
+    #[test]
+    #[ignore = "Starts `codex app-server` and reads the signed-in account's usage (no model call)"]
+    fn native_codex_usage_is_read() {
+        let limits = rate_limits().expect("Codex answered");
+        assert!(limits.get("primary").is_some() || limits.get("secondary").is_some(), "{limits}");
+    }
 
     #[test]
     fn the_prompt_never_reaches_the_command_line() {

@@ -208,12 +208,8 @@ function planSection(initial: PlanRelayStatus): HTMLElement {
     body.append(
       h("div", {
         class: "hint",
-        text: "Shows your Claude plan's 5-hour and weekly usage on the island's Claude Code card, and as a pill in its header if you like. Coucou adds a status line to settings.json that passes these numbers on from Claude Code; Claude Code shows them on its status line too. A status line you already have keeps working as before. Pro and Max plans only.",
+        text: "The island's Claude Code card shows your Claude plan's 5-hour and weekly usage — one pool for Claude Code, Cowork and the Claude apps. Coucou asks Claude Code for it with a tiny request when the numbers are more than ten minutes old and the card is open. Optional: with this status line, Claude Code also passes them on after each reply in a terminal, at no cost, and shows them on its status line. A status line you already have keeps working as before. Pro and Max plans only.",
       }),
-      h("div", { class: "row" },
-        h("label", { text: "Pill in the header" }),
-        toggle(settings.showPlanUsage, (on) => void setShown(on)),
-      ),
       h("div", { class: "row" },
         h("label", { text: "Status line" }),
         h("span", { class: "path", text: line }),
@@ -233,19 +229,7 @@ function planSection(initial: PlanRelayStatus): HTMLElement {
     body.append(actions);
   }
 
-  /** Turning the pill on without the status line asks to install it first. */
-  async function setShown(on: boolean) {
-    if (on && !status.installed) {
-      await showPreview(true, true);
-      return;
-    }
-    settings.showPlanUsage = on;
-    await save();
-    clear(body);
-    draw();
-  }
-
-  async function showPreview(install: boolean, fromSwitch = false) {
+  async function showPreview(install: boolean) {
     let preview;
     try {
       preview = await Bridge.planRelayPreview(install);
@@ -276,9 +260,7 @@ function planSection(initial: PlanRelayStatus): HTMLElement {
     confirm.addEventListener("click", async () => {
       confirm.disabled = true;
       try {
-        const backup = await Bridge.planRelayApply(install, preview.fingerprint, fromSwitch ? true : null);
-        if (!install) settings.showPlanUsage = false;
-        else if (fromSwitch) settings.showPlanUsage = true;
+        const backup = await Bridge.planRelayApply(install, preview.fingerprint);
         clear(body);
         body.append(h("div", {
           class: "notice ok",

@@ -12,7 +12,9 @@ import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { renderPlanCard } from "./plan";
-import { dominantPct, nowSeconds, pillLabel, planColor } from "../core/plan";
+import { nowSeconds } from "../core/plan";
+import { formatSpeed } from "../core/net";
+import { Bridge } from "../core/bridge";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -94,31 +96,14 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
 
-  // Claude plan usage, home view only: a small pill that opens the plan card.
-  const planLabel = h("span", {});
-  const planDot = h("i", {});
-  const planPill = h("button", {
-    class: "plan-pill",
-    title: "Claude plan usage",
-    onclick: () => {
-      actions.blip();
-      State.planDetail = State.planDetail === "claude" ? null : "claude";
-      State.notify();
-    },
-  }, planDot, planLabel);
-  let planHover = false;
-  planPill.addEventListener("mouseenter", () => { planHover = true; paintPlanPill(); });
-  planPill.addEventListener("mouseleave", () => { planHover = false; paintPlanPill(); });
-
-  function paintPlanPill() {
-    const color = planColor(dominantPct(State.planUsage));
-    const active = planHover || State.planDetail === "claude";
-    planDot.style.background = color;
-    planPill.style.background = active ? `${color}2e` : "";
-    planPill.style.borderColor = active ? `${color}8c` : `${color}24`;
-    planPill.style.color = active ? lighten(color, 0.3) : "";
-    planLabel.textContent = pillLabel(State.planUsage);
-  }
+  // Internet speed right now, from the network adapters' counters (sampled by
+  // Rust once a second while the island is on screen).
+  const down = h("span", { class: "v" });
+  const up = h("span", { class: "v" });
+  const speed = h("div", {
+    class: "net-speed",
+    title: "Internet speed right now: download ↓ and upload ↑",
+  }, h("span", { class: "arrow", text: "↓" }), down, h("span", { class: "arrow", text: "↑" }), up);
 
   function go(v: IslandViewName) {
     actions.blip();
@@ -129,7 +114,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
     "div",
     { id: "header" },
     h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
-    h("div", { class: "header-actions" }, planPill, gearBtn, soundBtn),
+    h("div", { class: "header-actions" }, speed, gearBtn, soundBtn),
   );
 
   return {
@@ -144,8 +129,12 @@ export function buildHeader(actions: ViewActions): ViewHost {
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
       clear(soundBtn);
       soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
-      planPill.hidden = !(v === "overview" && State.settings.showPlanUsage && State.planRelayInstalled);
-      if (!planPill.hidden) paintPlanPill();
+      const net = State.netSpeed;
+      speed.hidden = net == null;
+      if (net) {
+        down.textContent = formatSpeed(net.down);
+        up.textContent = formatSpeed(net.up);
+      }
       el.style.opacity = v === "confused" ? "0" : "1";
     },
   };
@@ -247,10 +236,6 @@ function buildOverview(actions: ViewActions): ViewHost {
       : task.source === "agent"
   );
 
-      // Claude's status line removed: its numbers stop, and the card goes.
-      if (State.planDetail === "claude" && !State.planRelayInstalled) {
-        State.planDetail = null;
-      }
       if (State.planDetail) {
         if (mode !== "plan" || planKey() !== cardKey) showPlan();
       } else if (task && sessionActive) {
@@ -281,12 +266,17 @@ function buildOverview(actions: ViewActions): ViewHost {
         ticker.sync(task);
       } else if (task) {
         const info = State.integrations[task.id];
+        // The Claude Code and Codex cards show plan usage: ask for fresher
+        // numbers while one is open on screen (Rust decides whether to).
+        if (State.mode === "expanded" && (task.id === "integration_claude" || task.id === "agent_codex")) {
+          requestUsage(task.id === "integration_claude" ? "claude" : "codex");
+        }
         const key = [
           task.id, detailOpen, task.state, task.steps.join("|"),
           info?.loaded, info?.error, info?.configured,
           JSON.stringify(info?.data ?? {}),
           // The usage line on the Claude Code and Codex cards.
-          State.planRelayInstalled, JSON.stringify(State.planUsage), JSON.stringify(State.codexUsage),
+          JSON.stringify(State.planUsage), JSON.stringify(State.codexUsage), Math.floor(nowSeconds() / 60),
         ].join("~");
         if (key !== cardKey) {
           cardKey = key;
@@ -308,6 +298,15 @@ function buildOverview(actions: ViewActions): ViewHost {
       }
     },
   };
+}
+
+const usageAsked: Record<string, number> = {};
+
+function requestUsage(kind: "claude" | "codex") {
+  const now = Date.now();
+  if (now - (usageAsked[kind] ?? 0) < 30_000) return;
+  usageAsked[kind] = now;
+  void Bridge.usageRefresh(kind);
 }
 
 function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {

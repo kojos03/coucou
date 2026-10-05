@@ -138,8 +138,6 @@ export interface Settings {
   openaiAuth: "codex" | "apiKey";
   /** Claude's Mochi signs in through Claude Code (Claude plan) or an API key. */
   anthropicAuth: "claudeCode" | "apiKey";
-  /** The Claude plan pill in the header (needs the status line relay). */
-  showPlanUsage: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -157,7 +155,6 @@ export const DEFAULT_SETTINGS: Settings = {
   openaiModel: "gpt-6.1-sol",
   openaiAuth: "codex",
   anthropicAuth: "claudeCode",
-  showPlanUsage: false,
 };
 
 type Listener = () => void;
@@ -193,11 +190,12 @@ class AppState {
 
   integrations: Record<string, IntegrationInfo> = {};
 
-  /** Claude plan usage from Claude Code's status line, and whether its relay is in. */
+  /** Claude plan usage: one pool for Claude Code, Cowork and the Claude apps. */
   planUsage: PlanUsage | null = null;
-  planRelayInstalled = false;
   /** Codex's plan usage, from its own session logs. */
   codexUsage: PlanUsage | null = null;
+  /** Download and upload speed right now, in bits per second (the header). */
+  netSpeed: { down: number; up: number } | null = null;
   /** Whose plan card replaces the left card; any navigation closes it. */
   planDetail: "claude" | "codex" | null = null;
 

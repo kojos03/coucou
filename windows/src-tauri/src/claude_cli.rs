@@ -63,7 +63,9 @@ fn print_args(system: &str, dirs: &[PathBuf]) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     for arg in [
         "-p",
-        "--output-format", "json",
+        // stream-json, so the plan windows come along with the answer.
+        "--output-format", "stream-json",
+        "--verbose",
         "--no-session-persistence",
         "--restricted",
         "--safe-mode",
@@ -197,10 +199,12 @@ fn run(claude: &Path, dir: &Path, prompt: &str, dirs: &[PathBuf]) -> Result<Stri
     if status.is_none() {
         return Err(ChatError::new("timeout", "Claude Code did not answer within 4 minutes. Try again.", false));
     }
+    note_plan(&out);
     outcome(&out, &err)
 }
 
-/// The `--output-format json` result object, wherever it sits in the output.
+/// The result object, wherever it sits in the output (the last line of
+/// stream-json, or the whole of `--output-format json`).
 fn result_message(stdout: &str) -> Option<Value> {
     let trimmed = stdout.trim();
     std::iter::once(trimmed)
@@ -316,6 +320,73 @@ fn auth_status(claude: &Path) -> Result<(), ChatError> {
     }
 }
 
+/// How long the usage check may take.
+const USAGE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The usage check's arguments: the smallest request Claude Code can make on
+/// the plan — Haiku, no tools, no customizations (CLAUDE.md, plugins, MCP,
+/// skills), a one-line system prompt, no session saved. About 400 input tokens.
+/// `stream-json` carries the `rate_limit_event` with both plan windows.
+fn usage_args() -> Vec<OsString> {
+    [
+        "-p",
+        "--model", "haiku",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--no-session-persistence",
+        "--restricted",
+        "--safe-mode",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--exclude-dynamic-system-prompt-sections",
+        "--settings", NO_HOOKS,
+        "--tools", "",
+        "--effort", "low",
+        "--max-turns", "1",
+        "--system-prompt", "Reply with one word.",
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect()
+}
+
+/// The last `rate_limit_info` in Claude Code's stream-json output.
+pub(crate) fn rate_limit_info(output: &str) -> Option<Value> {
+    output
+        .lines()
+        .rev()
+        .filter(|line| line.contains("rate_limit_event"))
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .find(|message| message["type"] == "rate_limit_event")
+        .and_then(|event| event.get("rate_limit_info").cloned())
+}
+
+/// Claude plan usage through Claude Code itself, for when no fresher numbers
+/// came from the status line or Mochi: one tiny request whose answer carries
+/// the plan windows. When the plan is at its limit the request is refused, and
+/// the refusal still carries them.
+pub(crate) fn plan_check() -> Option<Value> {
+    let claude = claude_exe().ok()?;
+    let dir = work_dir().ok()?;
+    let mut cmd = command(&claude, &dir, usage_args());
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut child = cmd.spawn().ok()?;
+    let stdout = read_all(child.stdout.take());
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(b"ok");
+    }
+    wait(&mut child, USAGE_TIMEOUT)?;
+    let out = stdout.recv_timeout(Duration::from_secs(5)).unwrap_or_default();
+    rate_limit_info(&out)
+}
+
+/// Mochi's own chats carry the plan windows too, at no extra cost.
+fn note_plan(stdout: &str) {
+    if let Some(info) = rate_limit_info(stdout) {
+        crate::plan_usage::record_claude_info(&info);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,11 +399,11 @@ mod tests {
     fn the_prompt_never_reaches_the_command_line() {
         let args = strings(&print_args("SYSTEM", &[PathBuf::from("C:/Users/me/Downloads")]));
         assert_eq!(args.first().map(String::as_str), Some("-p"));
-        for flag in ["--restricted", "--safe-mode", "--no-session-persistence"] {
+        for flag in ["--restricted", "--safe-mode", "--no-session-persistence", "--verbose"] {
             assert!(args.iter().any(|a| a == flag), "{flag}");
         }
         let pairs = [
-            ("--output-format", "json"),
+            ("--output-format", "stream-json"),
             ("--permission-mode", "dontAsk"),
             ("--tools", TOOLS),
             ("--allowedTools", TOOLS),
@@ -347,6 +418,26 @@ mod tests {
         assert_eq!(args.last().map(String::as_str), Some("C:/Users/me/Downloads"));
         assert!(!args.iter().any(|a| a.contains("danger") || a.contains("bypass") || a.contains("Bash")));
         assert!(!strings(&print_args("SYSTEM", &[])).iter().any(|a| a == "--add-dir"));
+    }
+
+    #[test]
+    fn the_usage_check_is_the_smallest_request_and_its_plan_windows_are_found() {
+        let args = strings(&usage_args());
+        for (flag, value) in [("--model", "haiku"), ("--tools", ""), ("--max-turns", "1"), ("--output-format", "stream-json")] {
+            assert!(args.windows(2).any(|w| w[0] == flag && w[1] == value), "{flag} {value}");
+        }
+        for flag in ["--safe-mode", "--restricted", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--verbose"] {
+            assert!(args.iter().any(|a| a == flag), "{flag}");
+        }
+        // As Claude Code 2.1 writes it (one line per message).
+        let output = concat!(
+            r#"{"type":"system","subtype":"init"}"#, "\n",
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1791702000,"rateLimitType":"seven_day","utilization":0.56,"unifiedWindows":{"five_hour":{"utilization":0.24,"resetsAt":1791238800},"seven_day":{"utilization":0.56,"resetsAt":1791702000}}}}"#, "\n",
+            r#"{"type":"result","subtype":"success","result":"ok"}"#, "\n",
+        );
+        let info = rate_limit_info(output).unwrap();
+        assert_eq!(info["unifiedWindows"]["five_hour"]["utilization"], 0.24);
+        assert_eq!(rate_limit_info(r#"{"type":"result","result":"rate_limit_event"}"#), None);
     }
 
     #[test]

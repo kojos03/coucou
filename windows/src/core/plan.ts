@@ -13,8 +13,10 @@ export interface PlanWindow {
 export interface PlanUsage {
   fiveHour: PlanWindow | null;
   sevenDay: PlanWindow | null;
-  /** Unix seconds of the Claude Code reply that brought the numbers. */
+  /** Unix seconds of the reply (or check) that brought the numbers. */
   updatedAt: number;
+  /** The plan is refusing requests until a window resets. */
+  limitReached?: boolean;
 }
 
 export const nowSeconds = () => Date.now() / 1000;

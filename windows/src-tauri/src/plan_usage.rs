@@ -1,9 +1,17 @@
-// Claude plan usage: the 5-hour and weekly windows Claude Code passes to its
-// status line (`rate_limits`, Pro and Max plans), relayed by
-// `coucou-hook --statusline`. A port of upstream #159.
+// Plan usage: the 5-hour and weekly windows of the Claude and ChatGPT plans,
+// for the usage lines on the Claude Code and Codex cards. A port of upstream
+// #159, extended.
 //
-// Two halves. The gauge: validated, kept in memory and in plan-usage.json so
-// the pill survives a restart, and sent to the island. The installer: the
+// Claude's numbers are one pool for Claude Code, Cowork and the Claude apps.
+// They come, freshest first, from Claude Code's status line (relayed by
+// `coucou-hook --statusline` after each terminal reply), from Claude's Mochi's
+// own chats, and otherwise from a tiny check through Claude Code (claude_cli.rs)
+// when the card shows numbers more than ten minutes old. Codex's come from
+// Codex itself (`codex app-server`, no model call), or its session logs.
+//
+// The gauges are validated, kept in memory and in plan-usage.json /
+// codex-usage.json so they survive a restart, and sent to the island. The
+// status line installer: the
 // `statusLine` key of ~/.claude/settings.json, under the hooks' rules (diff,
 // dated backup, written only after an explicit click). A status line the user
 // already had keeps running: it is saved beside the relay, which runs it and
@@ -15,8 +23,8 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -50,9 +58,43 @@ pub struct PlanUsage {
     pub seven_day: Option<PlanWindow>,
     /// Unix seconds of the reply that brought these numbers.
     pub updated_at: u64,
+    /// The plan is refusing requests until a window resets.
+    #[serde(default)]
+    pub limit_reached: bool,
 }
 
 static LATEST: Mutex<Option<PlanUsage>> = Mutex::new(None);
+static APP: OnceLock<AppHandle> = OnceLock::new();
+static CLAUDE_CHECKED: Mutex<Option<Instant>> = Mutex::new(None);
+static CODEX_CHECKED: Mutex<Option<Instant>> = Mutex::new(None);
+/// How old Claude's numbers may get before the card asks Claude Code again.
+const CLAUDE_EVERY: Duration = Duration::from_secs(10 * 60);
+/// How often the card may ask Codex.
+const CODEX_EVERY: Duration = Duration::from_secs(60);
+/// The shortest gap between two checks that a click or a finished turn asks for.
+const FORCED_EVERY: Duration = Duration::from_secs(20);
+
+/// Lets the readers that run outside a command (Mochi's chats, the relay,
+/// finished Codex turns) reach the island.
+pub fn init(app: &AppHandle) {
+    let _ = APP.set(app.clone());
+}
+
+fn show(event: &str, usage: &PlanUsage) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit_to(WINDOW_LABEL, event, usage.clone());
+    }
+}
+
+/// True when the last check was too recent; otherwise marks a check as begun.
+fn too_soon(last: &Mutex<Option<Instant>>, every: Duration) -> bool {
+    let mut last = last.lock().unwrap();
+    if last.is_some_and(|at| at.elapsed() < every) {
+        return true;
+    }
+    *last = Some(Instant::now());
+    false
+}
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -64,7 +106,35 @@ pub fn parse(payload: &Value, now: u64) -> Option<PlanUsage> {
     let limits = payload.get("rate_limits")?;
     let five_hour = window(limits.get("five_hour"), now);
     let seven_day = window(limits.get("seven_day"), now);
-    (five_hour.is_some() || seven_day.is_some()).then_some(PlanUsage { five_hour, seven_day, updated_at: now })
+    (five_hour.is_some() || seven_day.is_some())
+        .then_some(PlanUsage { five_hour, seven_day, updated_at: now, limit_reached: false })
+}
+
+/// Claude Code's `rate_limit_info` (stream-json): `unifiedWindows` holds both
+/// windows, with `utilization` from 0 to 1 (above 1 past the limit) and
+/// `resetsAt` in seconds; without it, only the window named by `rateLimitType`.
+pub fn parse_claude_info(info: &Value, now: u64) -> Option<PlanUsage> {
+    let window_of = |raw: &Value| -> Option<PlanWindow> {
+        let utilization = raw.get("utilization")?.as_f64()?;
+        let mut resets = raw.get("resetsAt")?.as_f64()?;
+        if resets > 1e11 {
+            resets /= 1000.0; // milliseconds
+        }
+        checked(utilization * 100.0, resets, now)
+    };
+    let windows = info.get("unifiedWindows");
+    let mut five_hour = windows.and_then(|w| w.get("five_hour")).and_then(window_of);
+    let mut seven_day = windows.and_then(|w| w.get("seven_day")).and_then(window_of);
+    if five_hour.is_none() && seven_day.is_none() {
+        match info.get("rateLimitType").and_then(Value::as_str) {
+            Some("five_hour") => five_hour = window_of(info),
+            Some("seven_day") => seven_day = window_of(info),
+            _ => {}
+        }
+    }
+    let limit_reached = info.get("status").and_then(Value::as_str) == Some("rejected");
+    (five_hour.is_some() || seven_day.is_some())
+        .then_some(PlanUsage { five_hour, seven_day, updated_at: now, limit_reached })
 }
 
 fn window(raw: Option<&Value>, now: u64) -> Option<PlanWindow> {
@@ -99,22 +169,52 @@ pub fn latest() -> Option<PlanUsage> {
     latest.clone()
 }
 
-/// A status line payload from the relay: keep and show what it says.
-pub fn record(app: &AppHandle, payload: &Value) {
-    let Some(usage) = parse(payload, now()) else { return };
+fn store_claude(usage: PlanUsage) {
     *LATEST.lock().unwrap() = Some(usage.clone());
     if let Ok(text) = serde_json::to_vec(&usage) {
         let _ = std::fs::write(usage_path(), text);
     }
-    let _ = app.emit_to(WINDOW_LABEL, "plan-usage", usage);
+    show("plan-usage", &usage);
+}
+
+/// A status line payload from the relay: keep and show what it says.
+pub fn record(payload: &Value) {
+    if let Some(usage) = parse(payload, now()) {
+        store_claude(usage);
+    }
+}
+
+/// A `rate_limit_info` from one of Claude Code's runs.
+pub fn record_claude_info(info: &Value) {
+    if let Some(usage) = parse_claude_info(info, now()) {
+        store_claude(usage);
+    }
+}
+
+/// Asks Claude Code for the plan's numbers, when the card's are more than ten
+/// minutes old (`force`, a click on Refresh: twenty seconds). Blocking: a few
+/// seconds.
+pub fn refresh_claude(force: bool) {
+    let every = if force { FORCED_EVERY } else { CLAUDE_EVERY };
+    if latest().is_some_and(|usage| now().saturating_sub(usage.updated_at) < every.as_secs()) {
+        return;
+    }
+    if too_soon(&CLAUDE_CHECKED, every) {
+        return;
+    }
+    if let Some(info) = crate::claude_cli::plan_check() {
+        record_claude_info(&info);
+    }
 }
 
 // ── Codex ────────────────────────────────────────────────────────────────────
 //
-// Codex keeps its plan windows itself: every reply in a session log
+// Codex answers `account/rateLimits/read` itself (`codex app-server`, the
+// read the Codex app makes for its usage view): live numbers, including a
+// reached limit. Failing that, every reply in a session log
 // ($CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl) carries a `token_count`
-// event whose `rate_limits` has `primary` (the 5-hour window) and `secondary`
-// (the week). Reading the newest one back costs nothing and sends nothing.
+// event with the same `rate_limits` — but a refused turn writes none, which
+// is why the logs alone kept showing the numbers from before the limit.
 
 static CODEX_LATEST: Mutex<Option<PlanUsage>> = Mutex::new(None);
 /// How much of a session log's end is searched for its last reading.
@@ -137,11 +237,21 @@ pub fn codex_latest() -> Option<PlanUsage> {
     latest.clone()
 }
 
-/// Looks for a newer reading — at launch and after each Codex turn — and shows
-/// it. `session` is the chat that just finished, whose log may be days old.
-pub fn refresh_codex(app: &AppHandle, session: Option<&str>) {
-    let dir = crate::codex_hooks::hooks_path().with_file_name("sessions");
-    let Some(found) = newest_codex_reading(&dir, session, now()) else { return };
+/// Looks for newer numbers — at launch, after each Codex turn, and when the
+/// card is shown — and shows them. Live from Codex at most once a minute
+/// (`force`: every twenty seconds), else from the logs. `session` is the chat
+/// that just finished, whose log may be days old. Blocking: about a second.
+pub fn refresh_codex(session: Option<&str>, force: bool) {
+    let now = now();
+    let live = (!too_soon(&CODEX_CHECKED, if force { FORCED_EVERY } else { CODEX_EVERY }))
+        .then(crate::codex_cli::rate_limits)
+        .flatten()
+        .and_then(|limits| parse_codex(&limits, now, now));
+    let found = live.or_else(|| {
+        let dir = crate::codex_hooks::hooks_path().with_file_name("sessions");
+        newest_codex_reading(&dir, session, now)
+    });
+    let Some(found) = found else { return };
     if codex_latest().is_some_and(|current| current.updated_at >= found.updated_at) {
         return;
     }
@@ -149,7 +259,7 @@ pub fn refresh_codex(app: &AppHandle, session: Option<&str>) {
     if let Ok(text) = serde_json::to_vec(&found) {
         let _ = std::fs::write(codex_usage_path(), text);
     }
-    let _ = app.emit_to(WINDOW_LABEL, "codex-usage", found);
+    show("codex-usage", &found);
 }
 
 fn newest_codex_reading(dir: &Path, session: Option<&str>, now: u64) -> Option<PlanUsage> {
@@ -221,28 +331,33 @@ fn reading_in(path: &Path, now: u64) -> Option<PlanUsage> {
     })
 }
 
-/// Codex's `rate_limits`: each window goes by its length, so a plan whose
-/// primary window is the week still reads right.
+/// Codex's `rate_limits`, as the logs write them (`used_percent`,
+/// `window_minutes`, `resets_at`) or as the app server answers them
+/// (`usedPercent`, `windowDurationMins`, `resetsAt`). Each window goes by its
+/// length, so a plan whose primary window is the week still reads right.
 pub fn parse_codex(limits: &Value, at: u64, now: u64) -> Option<PlanUsage> {
+    let num = |raw: &Value, names: [&str; 2]| names.iter().find_map(|name| raw.get(*name).and_then(Value::as_f64));
     let mut five_hour = None;
     let mut seven_day = None;
     for key in ["primary", "secondary"] {
         let Some(raw) = limits.get(key).filter(|v| v.is_object()) else { continue };
-        let Some(w) = raw
-            .get("used_percent")
-            .and_then(Value::as_f64)
-            .zip(raw.get("resets_at").and_then(Value::as_f64))
+        let Some(w) = num(raw, ["used_percent", "usedPercent"])
+            .zip(num(raw, ["resets_at", "resetsAt"]))
             .and_then(|(pct, resets)| checked(pct, resets, now))
         else {
             continue;
         };
-        let weekly = match raw.get("window_minutes").and_then(Value::as_u64) {
-            Some(minutes) => minutes >= 24 * 60,
+        let weekly = match num(raw, ["window_minutes", "windowDurationMins"]) {
+            Some(minutes) => minutes >= 24.0 * 60.0,
             None => key == "secondary",
         };
         if weekly { seven_day.get_or_insert(w) } else { five_hour.get_or_insert(w) };
     }
-    (five_hour.is_some() || seven_day.is_some()).then_some(PlanUsage { five_hour, seven_day, updated_at: at })
+    let limit_reached = ["rate_limit_reached_type", "rateLimitReachedType"]
+        .iter()
+        .any(|name| limits.get(*name).is_some_and(|v| !v.is_null()));
+    (five_hour.is_some() || seven_day.is_some())
+        .then_some(PlanUsage { five_hour, seven_day, updated_at: at, limit_reached })
 }
 
 /// `2026-10-04T14:26:44.459Z` as Unix seconds (UTC only, as Codex writes it).
@@ -427,6 +542,41 @@ mod tests {
             "seven_day": { "used_percentage": 41, "resets_at": NOW + 10 },
         }}), NOW).unwrap();
         assert_eq!((one.five_hour, one.seven_day.map(|w| w.used_pct)), (None, Some(41.0)));
+    }
+
+    #[test]
+    fn claude_codes_rate_limit_event_gives_both_windows() {
+        let info = json!({ "status": "allowed_warning", "resetsAt": NOW + 86_400, "rateLimitType": "seven_day",
+            "utilization": 0.56, "isUsingOverage": false, "unifiedWindows": {
+                "five_hour": { "utilization": 0.24, "resetsAt": NOW + 3600 },
+                "seven_day": { "utilization": 0.56, "resetsAt": NOW + 86_400 } } });
+        let usage = parse_claude_info(&info, NOW).unwrap();
+        assert_eq!(usage.five_hour, Some(PlanWindow { used_pct: 24.0, resets_at: NOW + 3600 }));
+        assert!((usage.seven_day.unwrap().used_pct - 56.0).abs() < 1e-9);
+        assert!(!usage.limit_reached);
+        // At the limit: refused, slightly over 100 %, reset times in milliseconds.
+        let refused = json!({ "status": "rejected", "rateLimitType": "five_hour", "utilization": 1.04,
+            "resetsAt": (NOW + 600) * 1000 });
+        let usage = parse_claude_info(&refused, NOW).unwrap();
+        assert_eq!(usage.five_hour, Some(PlanWindow { used_pct: 100.0, resets_at: NOW + 600 }));
+        assert_eq!(usage.seven_day, None);
+        assert!(usage.limit_reached);
+        assert_eq!(parse_claude_info(&json!({ "status": "allowed" }), NOW), None);
+    }
+
+    #[test]
+    fn codexs_own_answer_is_read_like_its_logs_and_says_when_the_limit_is_reached() {
+        // `account/rateLimits/read`, as Codex 0.160 answered it at the limit.
+        let live = json!({ "limitId": "codex", "primary": { "usedPercent": 13, "windowDurationMins": 300, "resetsAt": NOW + 3000 },
+            "secondary": { "usedPercent": 100, "windowDurationMins": 10080, "resetsAt": NOW + 86_400 },
+            "planType": "plus", "rateLimitReachedType": "rate_limit_reached" });
+        let usage = parse_codex(&live, NOW, NOW).unwrap();
+        assert_eq!(usage.five_hour.unwrap().used_pct, 13.0);
+        assert_eq!(usage.seven_day.unwrap().used_pct, 100.0);
+        assert!(usage.limit_reached);
+        let fine = json!({ "primary": { "usedPercent": 13, "windowDurationMins": 300, "resetsAt": NOW + 3000 },
+            "rateLimitReachedType": null });
+        assert!(!parse_codex(&fine, NOW, NOW).unwrap().limit_reached);
     }
 
     #[test]

@@ -37,7 +37,9 @@ export function renderPlanCard(
       h("button", { class: "int-back", title: "Back", onclick: onBack }, svg(ICONS.chevronLeft, 10, { stroke: 2.4 })),
       dot(planColor(dominantPct(usage, now)), 7),
       h("b", { text: kind === "claude" ? "Claude plan" : "Codex plan" }),
-      h("span", { text: ageLabel(usage, now, kind === "claude" ? "Claude Code" : "Codex") }),
+      h("span", {
+        text: (usage?.limitReached ? "Limit reached · " : "") + ageLabel(usage, now, kind === "claude" ? "Claude Code" : "Codex"),
+      }),
     ),
     h("div", { class: "plan-rows" },
       row("5 hours", usage?.fiveHour ?? null, false, now),

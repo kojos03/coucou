@@ -428,28 +428,26 @@ test('the Codex hooks section reports, repairs and confirms without writing sile
   assert.equal(applied.length, 1);
 });
 
-test('the plan usage switch asks for the status line first and writes only after the diff', async () => {
+test('the plan status line is written only after the diff, and Cancel writes nothing', async () => {
   let current = { installed: false, settingsPath: 'C:/Users/me/.claude/settings.json', hookReady: true, kept: null, other: null };
-  const applied = [], saved = [];
+  const applied = [];
   const f = await fixture({
     planRelayStatus: async () => current,
     planRelayPreview: async install => ({ diff: install ? '+  "statusLine": {}' : '-  "statusLine": {}', backup: 'C:/settings.json.bak-1', settingsPath: 'x', fingerprint: 'fp' }),
-    planRelayApply: async (install, fingerprint, show) => { applied.push([install, fingerprint, show]); current = { ...current, installed: install }; return 'C:/settings.json.bak-1'; },
-    saveSettings: async s => { saved.push(s.showPlanUsage); },
+    planRelayApply: async (install, fingerprint) => { applied.push([install, fingerprint]); current = { ...current, installed: install }; return 'C:/settings.json.bak-1'; },
   }, true);
   const section = () => f.page.all().find(el => el.attrs.id === 'claude-plan');
-  const flip = () => section().all().find(el => el.className.startsWith('switch')).fire('click');
   assert.match(section().textContent, /Status lineNot installed/);
-  // The switch cannot turn the pill on without the status line: it shows the
-  // diff, and Cancel writes nothing at all.
-  await flip();
+  assert.match(section().textContent, /one pool for Claude Code, Cowork and the Claude apps/);
+  // No switch any more: the card shows the usage either way.
+  assert.equal(section().all().find(el => el.className.startsWith('switch')), undefined);
+  await f.button('Install status line…', section()).fire('click');
   assert.match(section().textContent, /the statusLine key only/);
   await f.button('Cancel', section()).fire('click');
   assert.deepEqual(applied, []);
-  assert.deepEqual(saved, []);
-  await flip();
+  await f.button('Install status line…', section()).fire('click');
   await f.button('Back up and write', section()).fire('click');
-  assert.deepEqual(applied, [[true, 'fp', true]]);
+  assert.deepEqual(applied, [[true, 'fp']]);
   assert.match(section().textContent, /Previous settings saved as C:\/settings.json.bak-1/);
 });
 
@@ -458,12 +456,12 @@ test('removing the plan status line says the user\'s own comes back', async () =
   const f = await fixture({
     planRelayStatus: async () => ({ installed: true, settingsPath: 'x', hookReady: true, kept: 'starship statusline', other: null }),
     planRelayPreview: async () => ({ diff: '-  "command": "coucou"\n+  "command": "starship statusline"', backup: 'C:/b', settingsPath: 'x', fingerprint: 'fp2' }),
-    planRelayApply: async (install, fingerprint, show) => { applied.push([install, fingerprint, show]); return 'C:/b'; },
+    planRelayApply: async (install, fingerprint) => { applied.push([install, fingerprint]); return 'C:/b'; },
   }, true);
   const section = () => f.page.all().find(el => el.attrs.id === 'claude-plan');
   assert.match(section().textContent, /keeps running yours: starship statusline/);
   await f.button('Remove status line…', section()).fire('click');
   assert.match(section().textContent, /back as it was before Coucou/);
   await f.button('Back up and remove', section()).fire('click');
-  assert.deepEqual(applied, [[false, 'fp2', null]]);
+  assert.deepEqual(applied, [[false, 'fp2']]);
 });

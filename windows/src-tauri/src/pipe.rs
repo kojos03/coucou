@@ -219,7 +219,7 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
     }
     // The status line relay: Claude plan usage, not a session event.
     if payload.get("coucou_kind").and_then(Value::as_str) == Some("statusline") {
-        crate::plan_usage::record(&app, &payload);
+        crate::plan_usage::record(&payload);
         pipe.finish();
         return;
     }
@@ -240,7 +240,7 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
     let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
     pipe.finish();
     if codex_turn {
-        tokio::task::spawn_blocking(move || crate::plan_usage::refresh_codex(&app, session.as_deref()));
+        tokio::task::spawn_blocking(move || crate::plan_usage::refresh_codex(session.as_deref(), true));
     }
     return;
 }

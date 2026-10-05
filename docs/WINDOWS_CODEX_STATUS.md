@@ -596,6 +596,49 @@ next reply*, then, fed one simulated status line (removed afterwards), the
 usage line, its tooltip and the plan card with its back arrow. Not yet seen: a
 real Claude Code reply feeding it, and a real Codex turn refreshing it.
 
+### 14. Live usage for both plans, and internet speed (`windows-plan-usage`)
+
+After using it for a day, the user reported three things:
+
+- **The Codex card kept the old numbers after the limit was reached.** A turn
+  that Codex refuses writes no `token_count` event, so the session logs held
+  only readings from before the limit. Codex itself answers
+  `account/rateLimits/read` over `codex app-server` (the read the Codex app
+  makes for its usage view; no model call): `codex_cli::rate_limits` sends the
+  `initialize` / `initialized` handshake and the read, takes the answer
+  (about a second) and stops the server. On the development machine it
+  returned the 5-hour window at 13 %, the week at 100 % and
+  `rateLimitReachedType: "rate_limit_reached"`. Coucou asks at launch, after
+  each Codex `Stop` (at most every 20 s), and while the Codex card is open (at
+  most once a minute); the logs remain the fallback. `PlanUsage` gained
+  `limitReached`, and the card line then reads *Weekly limit reached · resets
+  Fri 9:00* instead of the gauges.
+- **Claude's numbers never arrived, and Cowork should count too.** The plan's
+  limits are one pool for Claude Code, Cowork and the Claude apps, but the
+  status line only runs in Claude Code's terminal UI, which the user rarely
+  uses. Claude Code reports the plan windows on every request
+  (`rate_limit_event` in `--output-format stream-json`, with `unifiedWindows`
+  holding `five_hour` and `seven_day`, `utilization` from 0 to 1, `resetsAt` in
+  seconds; `status: "rejected"` at the limit). `claude_cli::plan_check` makes
+  the smallest such request — Haiku, no tools, `--safe-mode --restricted
+  --strict-mcp-config --disable-slash-commands`, a one-line system prompt, no
+  session saved — measured at 416 input and 117 output tokens (without the
+  safe flags, the user's plugins and skills made it 48,435). It runs only while
+  the Claude Code card is open and its numbers are over ten minutes old, or on
+  **Refresh** (20 s minimum). Claude's Mochi now uses stream-json too, so its
+  chats bring the numbers at no extra cost; the status line still does from
+  the terminal. Reading the Claude desktop app's own storage (where its usage
+  banner lives) was ruled out: undocumented, compressed, and mixed with
+  conversations.
+- **The grey "Claude —" pill went, and the header shows internet speed.** The
+  pill, its *Pill in the header* switch and the `showPlanUsage` setting are
+  removed (the usage card line stays). [netspeed.rs](../windows/src-tauri/src/netspeed.rs)
+  reads the physical adapters' byte counters (`GetIfTable2`, hardware
+  interfaces that are up, filter drivers excluded so traffic is not counted
+  twice; `/proc/net/dev` on Linux) once a second while the island is not
+  hidden, and the header shows `↓ 18 Mbps ↑ 1.1 Mbps`. Nothing is downloaded
+  to measure it.
+
 ## Where the implementation lives
 
 | File | Responsibility |
@@ -615,8 +658,9 @@ real Claude Code reply feeding it, and a real Codex turn refreshing it.
 | [chat.ts](../windows/src/views/chat.ts) | Chat per Mochi, errors, retry, and the Chat settings action |
 | [settings](../windows/src/settings/main.ts) and [hook installer](../windows/src-tauri/src/hooks.rs) | Settings window (hooks for both agents, both Mochis' sign-in and connection test) and Claude Code hook installation |
 | [pipe.rs](../windows/src-tauri/src/pipe.rs) and [relay](../windows/hook/src/main.rs) | Native transport and hook forwarding |
-| [plan_usage.rs](../windows/src-tauri/src/plan_usage.rs), [statusline.rs](../windows/hook/src/statusline.rs), [plan.ts](../windows/src/core/plan.ts) | Claude plan usage: status line relay and installer, gauge, header pill and card |
-| [plan-usage.test.mjs](../windows/tests/plan-usage.test.mjs) | 4 tests: gauge maths, header pill, plan card, usage lines on the Claude Code and Codex cards |
+| [plan_usage.rs](../windows/src-tauri/src/plan_usage.rs), [statusline.rs](../windows/hook/src/statusline.rs), [plan.ts](../windows/src/core/plan.ts) | Plan usage for both cards: Claude Code's status line, `rate_limit_event` and installer; Codex's app server and logs; gauges and plan card |
+| [netspeed.rs](../windows/src-tauri/src/netspeed.rs), [net.ts](../windows/src/core/net.ts) | Internet speed in the header |
+| [plan-usage.test.mjs](../windows/tests/plan-usage.test.mjs) | 3 tests: gauge maths, internet speed in the header, usage lines and plan card on the Claude Code and Codex cards |
 | [hooks.test.mjs](../windows/tests/hooks.test.mjs) | 25 lifecycle, routing, pill and approval tests |
 | [codex-views.test.mjs](../windows/tests/codex-views.test.mjs) | 6 view tests: the Codex card, ticker, cards and settings badge |
 | [phase1.test.mjs](../windows/tests/phase1.test.mjs) | 15 view tests: Phase 1, both Mochis and their sign-in choices, the Claude hand-off, and the Codex hooks section |

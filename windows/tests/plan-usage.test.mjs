@@ -104,6 +104,8 @@ function islandFixture() {
   const calls = [];
   const { Bridge } = load(resolve(root, 'core/bridge.ts'), cache);
   Bridge.openSettingsWindow = async section => { calls.push(['settings', section]); };
+  Bridge.usageRefresh = async (kind, force = false) => { calls.push(['usage', kind, force]); };
+  Bridge.refreshIntegration = async id => { calls.push(['refresh', id]); };
   const { State } = load(resolve(root, 'core/state.ts'), cache);
   State.loadIntegrationTasks();
   const actions = new Proxy({}, { get: (_, name) => (...args) => calls.push([name, ...args]) });
@@ -111,103 +113,74 @@ function islandFixture() {
   const header = views.buildHeader(actions);
   const overview = views.buildViews(actions, () => {}).get('overview');
   const sync = () => { header.sync(); overview.sync(); };
-  const pill = () => header.el.all().find(el => el.className === 'plan-pill');
-  return { State, header, overview, sync, pill, calls };
+  const speed = () => header.el.all().find(el => el.className === 'net-speed');
+  const net = load(resolve(root, 'core/net.ts'), cache);
+  return { State, header, overview, sync, speed, calls, net };
 }
 
-test('the header pill shows only on the home view, with the setting and the relay', () => {
+test('the header shows the internet speed, and no plan pill', () => {
   const f = islandFixture();
   f.State.view = 'overview';
   f.sync();
-  assert.equal(f.pill().hidden, true);
-  f.State.settings.showPlanUsage = true;
+  assert.equal(f.speed().hidden, true, 'nothing until the first reading');
+  assert.equal(f.header.el.all().find(el => el.className === 'plan-pill'), undefined);
+  f.State.netSpeed = { down: 18_400_000, up: 1_150_000 };
   f.sync();
-  assert.equal(f.pill().hidden, true, 'no relay, no pill');
-  f.State.planRelayInstalled = true;
-  f.sync();
-  assert.equal(f.pill().hidden, false);
-  assert.equal(f.pill().textContent, 'Claude —');
-  f.State.planUsage = usage(23, 85);
-  f.sync();
-  assert.equal(f.pill().textContent, 'Claude 85%');
-  assert.equal(f.pill().all().find(el => el.tag === 'i').style.background, '#F4505E');
+  assert.equal(f.speed().hidden, false);
+  assert.equal(f.speed().textContent, '↓18 Mbps↑1.1 Mbps');
+  // On every view, not just home.
   f.State.view = 'settings';
   f.sync();
-  assert.equal(f.pill().hidden, true);
-});
-
-test('the pill opens the plan card in place of the left card, and focus closes it', () => {
-  const f = islandFixture();
-  Object.assign(f.State, { view: 'overview', planRelayInstalled: true, planUsage: usage(23.5, 41) });
-  f.State.settings.showPlanUsage = true;
-  f.State.setFocus('integration_claude');
-  f.sync();
-  assert.match(f.overview.el.textContent, /Claude CodeIntegration/);
-  f.pill().fire('click');
-  assert.equal(f.State.planDetail, 'claude');
-  f.sync();
-  const text = f.overview.el.textContent;
-  assert.match(text, /Claude planjust now/);
-  assert.match(text, /5 hours24%in 1 h 20/);
-  assert.match(text, /Week41%/);
-  assert.equal(f.overview.el.all().find(el => el.className.includes('jump')).style.display, 'none');
-  // No numbers yet: dashes, and the card says what it waits for.
-  f.State.planUsage = null;
-  f.sync();
-  assert.match(f.overview.el.textContent, /Waiting for a Claude Code reply5 hours—Week—/);
-  // Picking a pill closes it, as on macOS.
-  f.State.setFocus('agent_codex');
-  f.sync();
-  assert.equal(f.State.planDetail, null);
-  assert.doesNotMatch(f.overview.el.textContent, /Claude plan/);
-  // Removing the status line takes the open card down with the pill.
-  f.pill().fire('click');
-  f.sync();
-  assert.match(f.overview.el.textContent, /Claude plan/);
-  f.State.planRelayInstalled = false;
-  f.sync();
-  assert.equal(f.State.planDetail, null);
-  assert.doesNotMatch(f.overview.el.textContent, /Claude plan/);
+  assert.equal(f.speed().hidden, false);
+  assert.deepEqual([0, 950, 120_000, 2_400_000, 64_000_000, 1_250_000_000].map(f.net.formatSpeed),
+    ['0 kbps', '1 kbps', '120 kbps', '2.4 Mbps', '64 Mbps', '1.3 Gbps']);
 });
 
 test('the Claude Code and Codex cards show their plan usage under the status', () => {
   const f = islandFixture();
-  f.State.view = 'overview';
+  Object.assign(f.State, { view: 'overview', mode: 'expanded' });
   f.State.integrations.integration_claude = { data: {}, error: null, loaded: false, configured: true };
   f.State.integrations.agent_codex = { data: { anyInstalled: true, app: true }, error: null, loaded: false, configured: true };
   const usageRow = () => f.overview.el.all().find(el => el.className === 'int-usage');
 
-  // Without Claude Code's status line, the card says where to turn it on.
+  // No numbers yet: the card asks for them (Claude Code decides whether to).
   f.State.setFocus('integration_claude');
   f.sync();
-  assert.match(f.overview.el.textContent, /ConnectedShow plan usage…/);
-  usageRow().all().find(el => el.tag === 'button').fire('click');
-  assert.deepEqual(f.calls.filter(c => c[0] === 'settings'), [['settings', 'plan']]);
-
-  f.State.planRelayInstalled = true;
-  f.sync();
-  assert.match(f.overview.el.textContent, /ConnectedPlan usage after Claude Code's next reply/);
+  assert.match(f.overview.el.textContent, /ConnectedChecking plan usage…Open Claude app/);
+  assert.deepEqual(f.calls.filter(c => c[0] === 'usage'), [['usage', 'claude', false]]);
 
   f.State.planUsage = usage(62, 35);
   f.sync();
   assert.match(f.overview.el.textContent, /Connected5h62%week35%Open Claude app/);
   assert.match(usageRow().attrs.title, /5 hours: 62%, resets in 1 h 20 · Week: 35%/);
+  // Refresh asks again at once.
+  f.overview.el.all().find(el => el.tag === 'button' && el.textContent === 'Refresh').fire('click');
+  assert.deepEqual(f.calls.filter(c => c[0] === 'usage').at(-1), ['usage', 'claude', true]);
   // The line opens the full card, with a way back.
   usageRow().fire('click');
   assert.equal(f.State.planDetail, 'claude');
   f.sync();
-  assert.match(f.overview.el.textContent, /Claude planjust now5 hours62%/);
+  assert.match(f.overview.el.textContent, /Claude planjust now5 hours62%in 1 h 20Week35%/);
+  assert.equal(f.overview.el.all().find(el => el.className.includes('jump')).style.display, 'none');
   f.overview.el.all().find(el => el.className === 'int-back').fire('click');
   assert.equal(f.State.planDetail, null);
 
-  // Codex: nothing until it has written a reading, then the same line.
+  // Codex at its weekly limit: the line says so, and when it resets.
   f.State.setFocus('agent_codex');
+  f.State.codexUsage = { ...usage(13, 100), limitReached: true };
   f.sync();
-  assert.equal(usageRow(), undefined);
-  f.State.codexUsage = usage(83, 92);
-  f.sync();
-  assert.match(f.overview.el.textContent, /Connected5h83%week92%/);
+  assert.match(f.overview.el.textContent, /ConnectedWeekly limit reached · resets /);
+  assert.ok(f.calls.some(c => c[0] === 'usage' && c[1] === 'codex'));
   usageRow().fire('click');
   f.sync();
-  assert.match(f.overview.el.textContent, /Codex planjust now5 hours83%/);
+  assert.match(f.overview.el.textContent, /Codex planLimit reached · just now5 hours13%/);
+  // Picking another pill closes the card, as on macOS.
+  f.State.setFocus('integration_claude');
+  f.sync();
+  assert.equal(f.State.planDetail, null);
+
+  // A refused 5-hour window reads the same way.
+  f.State.planUsage = { ...usage(100, 40), limitReached: true };
+  f.sync();
+  assert.match(f.overview.el.textContent, /5-hour limit reached · resets in 1 h 20/);
 });

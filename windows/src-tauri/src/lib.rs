@@ -11,6 +11,7 @@ mod integrations;
 mod island;
 mod launch;
 mod log;
+mod netspeed;
 mod openai;
 mod pipe;
 mod plan_usage;
@@ -218,31 +219,25 @@ fn plan_relay_preview(install: bool) -> Result<HookPreview, String> {
     plan_usage::preview(install)
 }
 
-/// Only ever called from an explicit click in the settings window. `show` turns
-/// the pill on with the relay (the switch that asked for it); removing the relay
-/// always turns it off.
+/// Only ever called from an explicit click in the settings window.
 #[tauri::command]
-fn plan_relay_apply(
-    app: AppHandle,
-    shared: State<Shared>,
-    install: bool,
-    fingerprint: String,
-    show: Option<bool>,
-) -> Result<String, String> {
+fn plan_relay_apply(app: AppHandle, install: bool, fingerprint: String) -> Result<String, String> {
     let backup = plan_usage::write(install, &fingerprint)?;
-    let updated = {
-        let mut current = shared.settings.lock().unwrap();
-        if !install {
-            current.show_plan_usage = false;
-        } else if let Some(show) = show {
-            current.show_plan_usage = show;
-        }
-        let _ = settings::save(&current);
-        current.clone()
-    };
-    let _ = app.emit("settings-changed", updated);
     let _ = app.emit("plan-relay-changed", install);
     Ok(backup)
+}
+
+/// Fresher plan numbers for the card on screen: "claude" asks Claude Code when
+/// they are over ten minutes old, "codex" asks Codex at most once a minute.
+/// `force` is the card's Refresh.
+#[tauri::command]
+async fn usage_refresh(kind: String, force: bool) {
+    let _ = tauri::async_runtime::spawn_blocking(move || match kind.as_str() {
+        "claude" => plan_usage::refresh_claude(force),
+        "codex" => plan_usage::refresh_codex(None, force),
+        _ => {}
+    })
+    .await;
 }
 
 #[tauri::command]
@@ -541,6 +536,7 @@ pub fn run() {
             plan_relay_status,
             plan_relay_preview,
             plan_relay_apply,
+            usage_refresh,
             approval_decision,
             approval_ack,
             approval_decline,
@@ -587,9 +583,10 @@ pub fn run() {
 
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
-            // The newest Codex plan reading, before the first turn of this run.
-            let codex_usage = handle.clone();
-            std::thread::spawn(move || plan_usage::refresh_codex(&codex_usage, None));
+            // Codex's plan numbers before the first turn of this run.
+            plan_usage::init(&handle);
+            std::thread::spawn(|| plan_usage::refresh_codex(None, true));
+            netspeed::start(handle.clone(), gate.clone());
             pipe::start(handle.clone());
             integrations::start(handle.clone());
             Ok(())

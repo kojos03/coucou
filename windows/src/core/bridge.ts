@@ -84,10 +84,16 @@ export const Bridge = {
   planRelayPreview: (install: boolean) => callOrThrow<HookPreview>("plan_relay_preview", { install }),
   /**
    * Writes the `statusLine` key — only after an explicit click, and only when
-   * settings.json still matches the preview. `show` turns the pill on with it.
+   * settings.json still matches the preview.
    */
-  planRelayApply: (install: boolean, fingerprint: string, show: boolean | null = null) =>
-    callOrThrow<string>("plan_relay_apply", { install, fingerprint, show }),
+  planRelayApply: (install: boolean, fingerprint: string) =>
+    callOrThrow<string>("plan_relay_apply", { install, fingerprint }),
+  /**
+   * Fresher plan numbers for the card on screen: Claude's through Claude Code
+   * when they are over ten minutes old, Codex's from Codex at most once a
+   * minute. `force` is the card's Refresh.
+   */
+  usageRefresh: (kind: "claude" | "codex", force = false) => call<void>("usage_refresh", { kind, force }),
 
   // ── Codex hooks (~/.codex/hooks.json) ─────────────────────────────────────
   codexHooksStatus: () => call<CodexHookStatus>("codex_hooks_status"),

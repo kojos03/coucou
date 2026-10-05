@@ -62,12 +62,8 @@ async function main() {
     void refreshConfigured();
   });
 
-  // Claude plan usage: the last numbers seen, then each status line update.
-  const refreshPlanRelay = async () => {
-    State.planRelayInstalled = (await Bridge.planRelayStatus())?.installed ?? false;
-    State.notify();
-  };
-  // Codex's come from its own session logs, read after each turn.
+  // Plan usage for the Claude Code and Codex cards: the last numbers seen,
+  // then every update (status line, Mochi's chats, Claude Code, Codex).
   await onEvent<PlanUsage>("plan-usage", (usage) => {
     State.planUsage = usage;
     State.notify();
@@ -76,10 +72,14 @@ async function main() {
     State.codexUsage = usage;
     State.notify();
   });
-  await onEvent<boolean>("plan-relay-changed", () => void refreshPlanRelay());
   State.planUsage = (await Bridge.planUsage()) ?? State.planUsage;
   State.codexUsage = (await Bridge.codexUsage()) ?? State.codexUsage;
-  void refreshPlanRelay();
+
+  // Internet speed in the header, once a second while the island is on screen.
+  await onEvent<{ down: number; up: number }>("net-speed", (speed) => {
+    State.netSpeed = speed;
+    State.notify();
+  });
 
   registerHookHandlers(island);
   registerIntegrationHandlers(island);
