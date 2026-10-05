@@ -5,13 +5,17 @@ Last checked: 3 October 2026, against
 `35886ec` (Coucou 0.1.4 for macOS). The fork's main working version is
 `windows-codex-claude`; its common ancestor with upstream `main` is `5332f9e`.
 
-**Rechecked 4 October 2026:** upstream `main` is now at `769c4f2` (Coucou
-0.1.7), 15 commits past `35886ec`. They are macOS and iPhone work — Mochi's
-wardrobe (#195), greeting v2 (#196), Mochi on the desktop (#198), keyboard
-shortcuts (#205), the iPhone app and widgets (#209–#213) and releases 0.1.5–0.1.7
-— plus one Windows change, an MSI installer target (#204: `tauri.conf.json`
-and `scripts/pack.mjs`). None of them changes #159. Merging them is a separate
-step, as before.
+**Merged 5 October 2026:** upstream `main` up to `30edad4` (Coucou 0.1.8 and
+the iPhone app 1.0), 22 commits past `35886ec`, came in through
+`windows-codex`, where a collaborator had merged it with the documentation pull
+request (#1): `af36385` on `windows-codex-claude`, `1a6fccb` on
+`windows-plan-usage`, both without conflicts. They are macOS and iPhone work —
+Mochi's wardrobe (#195), greeting v2 (#196), Mochi on the desktop (#198),
+keyboard shortcuts (#205), the iPhone app, widgets, Dynamic Island and
+approvals from the iPhone (#209–#241), the `relay/` Cloudflare Worker for its
+pushes, releases 0.1.5–0.1.8 — plus one Windows change, an MSI installer target
+next to NSIS (#204: `tauri.conf.json` and `scripts/pack.mjs`). None of them
+changes #159 or the Windows app's code.
 
 ## What upstream has added
 
@@ -102,7 +106,8 @@ treat it as its own change.
 
 ## Suggested order
 
-1. ~~Merge upstream `main`~~ — **done** (`9fbe01a`, 3 October).
+1. ~~Merge upstream `main`~~ — **done** (`9fbe01a`, 3 October; again up to
+   0.1.8 through `windows-codex`, `af36385`, 5 October).
 2. ~~Codex approvals (#130)~~ — **done** on `windows-codex-claude`, with the
    Codex pill brought to parity with Claude Code's
    ([status, section 10](WINDOWS_CODEX_STATUS.md)). Live check with a real
