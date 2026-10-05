@@ -80,10 +80,17 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
         eprintln!("[coucou] could not save settings: {err}");
     }
     if autostart_changed {
-        let manager = app.autolaunch();
-        let result = if settings.autostart { manager.enable() } else { manager.disable() };
-        if let Err(err) = result {
-            eprintln!("[coucou] autostart: {err}");
+        // The login entry names the running executable. A debug build lives in
+        // target/debug and goes stale, so it never registers itself; it may
+        // still remove the entry.
+        if settings.autostart && cfg!(debug_assertions) {
+            eprintln!("[coucou] autostart: debug build, launch at login left to the release build");
+        } else {
+            let manager = app.autolaunch();
+            let result = if settings.autostart { manager.enable() } else { manager.disable() };
+            if let Err(err) = result {
+                eprintln!("[coucou] autostart: {err}");
+            }
         }
     }
     if screen_changed {

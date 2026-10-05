@@ -640,6 +640,13 @@ After using it for a day, the user reported three things:
   hidden, and the header shows `↓ 18 Mbps ↑ 1.1 Mbps`. Nothing is downloaded
   to measure it.
 
+**Launch at startup (5 October).** The login entry
+(`HKCU\…\Run\Coucou`) holds the path of whichever build turned the setting
+on, so turning it on from a debug build made Windows start the stale
+`target\debug` copy. Debug builds now leave the entry alone when the setting
+is turned on (they still remove it when it is turned off); on the development
+machine it points at `target\release\coucou.exe`.
+
 ## Where the implementation lives
 
 | File | Responsibility |
