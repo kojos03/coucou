@@ -18,15 +18,14 @@ Approve Claude Code permissions, watch your session work, drop a file, chat with
 ## Windows Codex fork
 
 The `windows-codex` branch of [kojos03/coucou](https://github.com/kojos03/coucou/tree/windows-codex)
-contains the Windows Codex activity and completion work. See the
+is the latest working version of the Windows app. See the
 [progress report and next phases](../docs/WINDOWS_CODEX_STATUS.md) for completed
 changes, verification results, known limitations, and the collaborator workflow.
-The main working version is the `windows-codex-claude` branch. It builds on
-Phase 1 (`windows-phase1`: separate terminal and VS Code actions, chat setup
-errors, and a connection test) and adds two Mochis — Claude Code and Codex, each
-with its own pill and chat — plus Codex hook setup in Settings. Codex's Mochi can
-run on your ChatGPT plan through the Codex CLI. None of this is merged into
-`windows-codex` yet.
+It brings together Phase 1 (separate terminal and VS Code actions, chat setup
+errors, and a connection test), two Mochis — Claude Code and Codex, each with its
+own pill and chat, on your Claude and ChatGPT plans — Codex hook setup and
+approvals from the island, plan usage on both cards, and the internet speed in
+the header, with upstream Coucou 0.1.8 merged.
 
 <img src="screenshots/greeting.png" width="640" alt="Mochi waving hello at launch">
 

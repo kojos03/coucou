@@ -3,7 +3,8 @@
 Last checked: 3 October 2026, against
 [Louis-CFM/coucou](https://github.com/Louis-CFM/coucou) `main` at
 `35886ec` (Coucou 0.1.4 for macOS). The fork's main working version is
-`windows-codex-claude`; its common ancestor with upstream `main` is `5332f9e`.
+`windows-codex` (since 5 October; `windows-codex-claude` before); upstream
+`main` is merged into it up to `30edad4`.
 
 **Merged 5 October 2026:** upstream `main` up to `30edad4` (Coucou 0.1.8 and
 the iPhone app 1.0), 22 commits past `35886ec`, came in through
@@ -122,7 +123,7 @@ treat it as its own change.
 6. Gemini CLI and Antigravity (`n22-gemini`), resolving the 8 conflicts above.
 7. Local models, then Markdown (#156); first-name greeting (#154) alongside.
 
-Each port: one branch and pull request into `windows-codex-claude`, tests for
+Each port: one branch and pull request into `windows-codex`, tests for
 the new logic, `npm test`, `npx tsc --noEmit`, `cargo test -p coucou --lib
 --locked` (plus `-- --ignored` where native code changed), a release build, and
 a short manual check in the running app. Recheck upstream before each port;

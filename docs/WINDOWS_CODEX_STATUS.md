@@ -1,8 +1,8 @@
 # Windows Codex integration: progress and next phases
 
-Last updated: 3 October 2026, night: upstream Coucou 0.1.4 is merged, and the
-Codex pill now matches Claude Code's, approvals included (section 10). Claude's
-Mochi chats on the user's Claude plan (section 9); the upstream review is in
+Last updated: 5 October 2026: **`windows-codex` now holds the latest working
+version** — everything from `windows-codex-claude` and `windows-plan-usage`
+(sections 7–14), with upstream Coucou 0.1.8 merged. The upstream review is in
 [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
 This is the engineering handoff for Konstantinos and Zack on the
@@ -12,12 +12,13 @@ development.
 
 | Branch | Contents | State |
 |---|---|---|
-| `windows-codex` | [ee6176f — Fix Windows Codex activity and completion lifecycle](https://github.com/kojos03/coucou/commit/ee6176f7c42103de18d298d3a90969097204665f) | Pushed; integration baseline |
+| `windows-codex` | **Latest working version** (5 October): fast-forwarded to `windows-plan-usage`, so it contains every branch below, Zack's merge of the documentation pull request (#1) and upstream Coucou 0.1.8. Started from [ee6176f — Fix Windows Codex activity and completion lifecycle](https://github.com/kojos03/coucou/commit/ee6176f7c42103de18d298d3a90969097204665f) | Pushed; integration branch |
 | `windows-codex-documentation` | [2967bb8 — Document Windows Codex progress and next phases](https://github.com/kojos03/coucou/commit/2967bb80ad60e8e7dbeb6d64ebad011ecb4ec047), on top of `ee6176f` | Pushed |
-| `windows-phase1` | [3a8f2cd — Fix Windows launch actions and Mochi chat setup](https://github.com/kojos03/coucou/commit/3a8f2cdea98b3e1d9cc50349b6a94e9dd9ac6b50) and `c95d7ee` (review fix and this note), on top of `2967bb8` | Pushed; not merged into `windows-codex` or `main` |
-| `windows-codex-claude` | **Main working version.** Two Mochis and chats (section 7), subscriptions, Codex hook setup and named pills (section 8), Claude's Mochi on the Claude plan (section 9), upstream 0.1.4 merged and Codex approvals and visual parity (section 10), on top of `windows-phase1` | Pushed; not merged |
+| `windows-phase1` | [3a8f2cd — Fix Windows launch actions and Mochi chat setup](https://github.com/kojos03/coucou/commit/3a8f2cdea98b3e1d9cc50349b6a94e9dd9ac6b50) and `c95d7ee` (review fix and this note), on top of `2967bb8` | Pushed; merged into `windows-codex` (5 October) |
+| `windows-codex-claude` | Main working version until 5 October. Two Mochis and chats (section 7), subscriptions, Codex hook setup and named pills (section 8), Claude's Mochi on the Claude plan (section 9), upstream 0.1.4 merged and Codex approvals and visual parity (section 10), on top of `windows-phase1` | Pushed; merged into `windows-codex` (5 October) |
+| `windows-plan-usage` | Claude plan usage (section 13), live usage for both plans and the internet speed (section 14), upstream Coucou 0.1.8 merged, on top of `windows-codex-claude` | Pushed; merged into `windows-codex` (5 October) |
 
-**Current status:** `windows-codex-claude` is the main working version. It
+**Current status (3 October; see section 14 for later):** `windows-codex-claude` was the main working version. It
 passes every automated check natively on Windows, including the opt-in native
 tests, and the release build runs on the development machine. Claude's Mochi
 answered live in the island on the user's Claude Pro plan, with web search and a
@@ -754,13 +755,13 @@ Items 4 and 5 also cover the Codex lifecycle work.
    web search, and one about a dropped image. Drop an image and a PDF on
    Claude's Mochi. Switch **Sign in with** by hand in Settings. Confirm a Claude
    Code session lights up the Claude Code pill next to a Codex session.
-3. **Review and merge the Claude plan usage pull request** (`windows-plan-usage`,
-   section 13), install its status line from Settings, then **continue the
-   upstream ports** in the order of
+3. **Continue the upstream ports** in the order of
    [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md): answering
-   Claude questions (#165) next.
-4. **Decide review items 1–3 and merge** `windows-codex-claude` (which
-   contains `windows-phase1`) into `windows-codex` once the checks above pass.
+   Claude questions (#165) next. (Claude plan usage, section 13, is done.)
+4. ~~Merge `windows-codex-claude` into `windows-codex`~~ — **done** on
+   5 October at the user's request, so Zack sees the working version:
+   `windows-codex`, `windows-codex-claude` and `windows-plan-usage` all point
+   at the same commit. New work branches from `windows-codex`.
 
 ## Next phases
 
