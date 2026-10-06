@@ -227,11 +227,16 @@ function buildOverview(actions: ViewActions): ViewHost {
 
       // Claude Code and Codex with a live session keep the ticker; with none
       // they show their integration card, exactly like IntegrationCardView.
-      // Other agents only have a pill while a session runs.
+      // Claude Code's turn is over once it is idle: a VS Code chat stays open
+      // for hours, and its last output must not hold the card until then.
+      // Codex keeps the selected chat's steps. Other agents only have a pill
+      // while a session runs.
       const sessionActive =
   task != null &&
   (
-    isWorkspace(task)
+    task.source === "claudeCode"
+      ? task.state !== "idle"
+      : isWorkspace(task)
       ? task.state !== "idle" || task.steps.length > 0
       : task.source === "agent"
   );

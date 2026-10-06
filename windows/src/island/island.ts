@@ -3,6 +3,7 @@
 
 import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
+import { reportError } from "../core/errors";
 import {
   EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
@@ -701,6 +702,25 @@ export class Island {
   }
 
   private frame = (nowMs: number) => {
+    let busy = false;
+    try {
+      busy = this.drawFrame(nowMs);
+    } catch (err) {
+      // A throw here used to end the loop for good: `running` stayed true, so
+      // nothing could start it again and the island froze on its last picture,
+      // alerts included. Log it; the next change starts a fresh frame.
+      reportError("frame", err);
+    }
+    if (busy) {
+      requestAnimationFrame(this.frame);
+    } else {
+      this.running = false;
+      Sound.idle();
+    }
+  };
+
+  /** One frame; true while anything still moves. */
+  private drawFrame(nowMs: number): boolean {
     const dt = Math.min(0.05, (nowMs - this.lastFrame) / 1000);
     this.lastFrame = nowMs;
 
@@ -711,7 +731,12 @@ export class Island {
 
     if (this.dirty) {
       this.dirty = false;
-      this.syncDom();
+      // A view that throws must not stop the island from opening or moving.
+      try {
+        this.syncDom();
+      } catch (err) {
+        reportError("view", err);
+      }
     }
 
     this.updateBotTargets();
@@ -760,13 +785,8 @@ export class Island {
         greetingActive || this.engine.busy || UploadSeq.isActive ||
         this.views.get(State.view)?.animating?.() === true;
 
-    if (busy) {
-      requestAnimationFrame(this.frame);
-    } else {
-      this.running = false;
-      Sound.idle();
-    }
-  };
+    return busy;
+  }
 
   private updateBotTargets() {
     const p = botPosition(State.mode, State.view, this.height.value, State.uploadProgress);

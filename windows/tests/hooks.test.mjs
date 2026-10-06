@@ -11,7 +11,7 @@ import ts from 'typescript';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
 function fixture() {
   const listeners = {};
-  const sounds = [], timers = [], declined = [], acked = [];
+  const sounds = [], timers = [], declined = [], acked = [], logs = [];
   const cache = new Map();
   function load(file) {
     if (cache.has(file)) return cache.get(file);
@@ -26,7 +26,7 @@ function fixture() {
       require: (name) => {
         if (name.endsWith('/bridge')) return {
           onEvent: (event, fn) => { listeners[event] = fn; },
-          Bridge: { approvalDecline: (id) => declined.push(id), approvalAck: (id) => acked.push(id) },
+          Bridge: { approvalDecline: (id) => declined.push(id), approvalAck: (id) => acked.push(id), log: (line) => logs.push(line) },
         };
         if (name.endsWith('/sound')) return { Sound: { play: (sound) => sounds.push(sound) } };
         return load(resolve(dirname(file), `${name}.ts`));
@@ -51,7 +51,7 @@ function fixture() {
     turn_id: turn, cwd: `C:/${session}`, ...extra,
   });
   const task = () => State.tasks.find((entry) => entry.id === 'agent_codex');
-  return { State, send, task, sounds, timers, declined, acked, listener, listeners, hooks };
+  return { State, send, task, sounds, timers, declined, acked, logs, listener, listeners, hooks };
 }
 
 test('repeated turn clears completion, badge and old steps, and returns to overview', () => {
@@ -220,6 +220,76 @@ test('Claude completion and external permission decline retain their existing be
   f.listener({ coucou_agent: 'gemini', hook_event_name: 'PermissionRequest', request_id: 'approval-test' });
   assert.deepEqual(f.declined, ['approval-test']);
   assert.equal(f.State.pendingApproval, null);
+});
+
+test('each Claude Code turn starts its own ticker, and the finish is logged', () => {
+  const f = fixture();
+  const claude = () => f.State.tasks.find((task) => task.id === 'integration_claude');
+  f.listener({ hook_event_name: 'UserPromptSubmit', cwd: 'C:/npu', prompt: 'first question' });
+  f.listener({ hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: 'C:/npu/top.vhd' } });
+  f.listener({ hook_event_name: 'Stop', last_assistant_message: 'First answer.' });
+  assert.equal(claude().state, 'finished');
+  assert.equal(f.State.view, 'finished');
+  assert.equal(claude().steps.at(-1), 'First answer.');
+  assert.deepEqual(f.logs, ['Claude Code finished: card, island was compact']);
+  f.timers.forEach((callback) => callback());
+  assert.equal(claude().state, 'idle');
+  // A VS Code chat stays open: the next prompt must not carry the old output.
+  f.listener({ hook_event_name: 'UserPromptSubmit', cwd: 'C:/npu', prompt: 'second question' });
+  assert.deepEqual(Array.from(claude().steps), ['second question']);
+  assert.equal(claude().state, 'thinking');
+  assert.equal(claude().name, 'npu');
+  // Finishing while the island is open on another pill badges it instead.
+  f.State.setFocus('agent_codex');
+  f.State.view = 'overview';
+  f.listener({ hook_event_name: 'Stop', last_assistant_message: 'Second answer.' });
+  assert.equal(claude().pillBadge, 'finished');
+  assert.equal(f.State.focusId, 'agent_codex');
+  assert.equal(f.State.view, 'overview');
+  assert.equal(f.logs.at(-1), 'Claude Code finished: badge, island was expanded');
+  // With the island closed nobody is looking at that pill: the card opens.
+  f.listener({ hook_event_name: 'UserPromptSubmit', prompt: 'third question' });
+  f.State.setFocus('agent_codex');
+  f.State.mode = 'hidden';
+  f.listener({ hook_event_name: 'Stop', last_assistant_message: 'Third answer.' });
+  assert.equal(f.State.focusId, 'integration_claude');
+  assert.equal(f.State.view, 'finished');
+  assert.equal(claude().pillBadge, null);
+  assert.equal(f.logs.at(-1), 'Claude Code finished: card, island was hidden');
+});
+
+test('a Claude Code turn without a Stop settles at the prompt or after ten quiet minutes', () => {
+  const f = fixture();
+  const claude = () => f.State.tasks.find((task) => task.id === 'integration_claude');
+  const tool = () => f.listener({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'make' } });
+  // Interrupted: no Stop, then Claude Code waits for the next prompt.
+  f.listener({ hook_event_name: 'UserPromptSubmit', prompt: 'build it' });
+  tool();
+  assert.equal(claude().state, 'working');
+  f.listener({ hook_event_name: 'Notification', notification_type: 'idle_prompt', message: 'Claude is waiting for your input' });
+  assert.equal(claude().state, 'idle');
+  assert.equal(f.logs.at(-1), 'Claude Code settled: waiting for a prompt');
+  // A question is still a question.
+  f.listener({ hook_event_name: 'UserPromptSubmit', prompt: 'again' });
+  f.listener({ hook_event_name: 'Notification', message: 'Should I continue?' });
+  assert.equal(claude().state, 'question');
+  // Silence: only the timer of the latest event counts.
+  f.timers.length = 0;
+  f.listener({ hook_event_name: 'UserPromptSubmit', prompt: 'long job' });
+  tool();
+  const [earlier, latest] = f.timers;
+  earlier();
+  assert.equal(claude().state, 'working');
+  latest();
+  assert.equal(claude().state, 'idle');
+  assert.equal(f.logs.at(-1), 'Claude Code settled: no event for 10 min');
+  // The next event brings the pill straight back.
+  tool();
+  assert.equal(claude().state, 'working');
+  // Only a running turn is settled.
+  f.State.updateTask('integration_claude', 'finished');
+  f.timers.at(-1)();
+  assert.equal(claude().state, 'finished');
 });
 
 test('other external agents keep the folder used by terminal and VS Code actions', () => {

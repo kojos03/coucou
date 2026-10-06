@@ -1,7 +1,7 @@
 # Windows Codex integration: progress and next phases
 
-Last updated: 5 October 2026: **`windows-codex` now holds the latest working
-version** — everything from `windows-codex-claude` and `windows-plan-usage`
+Last updated: 6 October 2026 (section 15: Claude Code in VS Code). On 5 October
+**`windows-codex` became the latest working version** — everything from `windows-codex-claude` and `windows-plan-usage`
 (sections 7–14), with upstream Coucou 0.1.8 merged. The upstream review is in
 [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
 
@@ -646,6 +646,44 @@ on, so turning it on from a debug build made Windows start the stale
 `target\debug` copy. Debug builds now leave the entry alone when the setting
 is turned on (they still remove it when it is turned off); on the development
 machine it points at `target\release\coucou.exe`.
+
+### 15. Claude Code in VS Code: the reply notifies, then the card clears (`windows-codex`)
+
+The user runs Claude Code through the VS Code extension. A reply sometimes
+brought no card, and the Claude Code card kept showing the turn's output
+afterwards. Coucou's log and the session transcript showed every `Stop`
+arriving (the hook ran in about 100 ms, no errors), so the island was at fault:
+
+- **The output stayed.** The card showed the ticker whenever the pill had
+  steps, and only `SessionEnd` cleared them, but a VS Code chat stays open for
+  hours. Claude Code's card now shows the ticker only while a turn runs
+  (finished included) and returns to *Connected* and the usage line once the
+  pill is idle; each prompt starts a fresh ticker. Codex keeps its selected
+  chat's steps, as before.
+- **No card when another pill was focused.** A finish behind another pill only
+  set a badge, even with the island hidden, so nothing appeared but the sound.
+  It now opens the finished card on Claude Code unless the island is open on
+  another pill, which still gets the badge; `StopFailure` follows the same
+  rule. Codex's own path is unchanged.
+- **Turns that end without `Stop`.** An interrupted turn sends none. Claude
+  Code's `idle_prompt` notification (*Claude is waiting for your input*) now
+  settles a running pill, and so do ten minutes without any event (Bash's
+  longest timeout); the next event revives it.
+- **One script error froze the island.** An exception in the frame loop left
+  `running` set, so the loop never started again. The loop now survives it, a
+  failing view no longer stops the island from opening, and script errors go to
+  `coucou.log` (`ui  error …`), as does each result (`ui  Claude Code finished:
+  card|badge, island was …`).
+
+Verified: `npm test` (55, three new), `npx tsc --noEmit`, `cargo test -p coucou
+--lib --locked` (53); a release build; and replays through the real relay
+against the running app: the finished card, then *Connected · 5h 14% · week
+65%*; a finish with Codex focused and the island compact opened the card;
+`idle_prompt` settled a running turn; injected frame and view errors were logged
+and the island still opened the next card. Not verified: a real interrupt in VS
+Code, the ten-minute timer in the app, and whether the extension sends
+`idle_prompt`. One session at 18:34 on 6 October (tool calls, no `Stop`, no
+transcript, not in the VS Code log) is unexplained.
 
 ## Where the implementation lives
 

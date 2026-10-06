@@ -2,6 +2,7 @@
 
 import "./style.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
+import { reportError } from "./core/errors";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import type { PlanUsage } from "./core/plan";
@@ -12,6 +13,10 @@ import { registerIntegrationHandlers, refreshConfigured } from "./island/integra
 async function main() {
   const root = document.getElementById("root");
   if (!root) return;
+
+  // Script errors used to vanish; now each leaves one line in Coucou's log.
+  window.addEventListener("error", (event) => reportError("script", event.error ?? event.message));
+  window.addEventListener("unhandledrejection", (event) => reportError("promise", event.reason));
 
   void Sound.preload();
 

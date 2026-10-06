@@ -184,3 +184,26 @@ test('the Claude Code and Codex cards show their plan usage under the status', (
   f.sync();
   assert.match(f.overview.el.textContent, /5-hour limit reached · resets in 1 h 20/);
 });
+
+test('once a Claude Code reply is done, its card goes back to Connected; Codex keeps its chat', () => {
+  const f = islandFixture();
+  Object.assign(f.State, { view: 'overview', mode: 'expanded', planUsage: usage(45, 59) });
+  f.State.integrations.integration_claude = { data: {}, error: null, loaded: false, configured: true };
+  const claude = f.State.tasks.find(task => task.id === 'integration_claude');
+  f.State.setFocus('integration_claude');
+  Object.assign(claude, { state: 'finished', steps: ['explain the ALU', 'Read · alu.vhd', 'The ALU adds.'], stepIndex: 2 });
+  f.sync();
+  assert.match(f.overview.el.textContent, /The ALU adds\./);
+  assert.doesNotMatch(f.overview.el.textContent, /Connected/);
+  // Idle with the steps still in memory: the card, not the old output.
+  claude.state = 'idle';
+  f.sync();
+  assert.match(f.overview.el.textContent, /Connected5h45%week59%/);
+  assert.doesNotMatch(f.overview.el.textContent, /The ALU adds/);
+  // Codex shows the chat it selected, idle or not, as before.
+  const codex = f.State.tasks.find(task => task.id === 'agent_codex');
+  f.State.setFocus('agent_codex');
+  Object.assign(codex, { state: 'idle', steps: ['fix the test', 'Tests passed.'], stepIndex: 1 });
+  f.sync();
+  assert.match(f.overview.el.textContent, /Tests passed\./);
+});

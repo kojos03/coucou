@@ -29,6 +29,8 @@ export interface HookPayload {
   last_assistant_message?: string | null;
   /** UserPromptSubmit carries `prompt`; `message` belongs to Notification/Stop. */
   prompt?: string;
+  /** Claude Code's Notification kind, e.g. `idle_prompt` while it waits for a prompt. */
+  notification_type?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   /** Optional agent tag: lowercase, digits and hyphens, ≤ 24 chars. */
@@ -193,6 +195,42 @@ function upsert(projectName: string, cwd: string) {
   if (cwd) t.sessionCwd = cwd;
 }
 
+/** A new Claude Code turn starts its own ticker; the last reply is not part of it. */
+function newClaudeTurn() {
+  const t = State.tasks.find((x) => x.id === CLAUDE_ID);
+  if (!t) return;
+  t.steps = [];
+  t.stepIndex = 0;
+}
+
+/** Claude Code is waiting for a prompt, so whatever ran is over: settle quietly. */
+function settleClaude(reason: string) {
+  const t = State.tasks.find((x) => x.id === CLAUDE_ID);
+  if (!t || (t.state !== "thinking" && t.state !== "working")) return;
+  State.updateTask(CLAUDE_ID, "idle");
+  void Bridge.log(`Claude Code settled: ${reason}`);
+}
+
+/**
+ * Claude Code sends no Stop when a turn is interrupted (Esc, or the stop button
+ * in VS Code) or its process dies, and a VS Code chat can stay open for hours,
+ * so the pill would keep "working" on its last output. Ten minutes without a
+ * single event (Bash's longest timeout) settles it; the next event revives it.
+ */
+const CLAUDE_QUIET_MS = 10 * 60 * 1000;
+let claudeQuiet = 0;
+let claudeQuietTimer: number | null = null;
+
+function watchClaude() {
+  const mine = ++claudeQuiet;
+  if (claudeQuietTimer != null) window.clearTimeout(claudeQuietTimer);
+  claudeQuietTimer = window.setTimeout(() => {
+    if (mine !== claudeQuiet) return;
+    claudeQuietTimer = null;
+    settleClaude("no event for 10 min");
+  }, CLAUDE_QUIET_MS);
+}
+
 function clearSession() {
   const t = State.tasks.find((x) => x.id === CLAUDE_ID);
   if (!t) return;
@@ -320,6 +358,25 @@ function handleHook(island: Island, payload: HookPayload) {
     }
   };
 
+  /**
+   * A finished or failed turn. Behind another pill, it opens on this one only
+   * when the island is not open: then nobody is looking at the other pill, and
+   * a badge on a hidden island told no one. Open on another pill, it badges, so
+   * the view is not yanked away.
+   */
+  const announce = (view: "finished" | "error") => {
+    const before = State.mode;
+    const shown = focused || before !== "expanded";
+    if (shown) {
+      if (!focused) State.setFocus(agentId);
+      surface(view, true);
+    } else {
+      State.setPillBadge(agentId, view);
+    }
+    // One line per result, so a missed alert can be traced afterwards.
+    void Bridge.log(`${agentId === CLAUDE_ID ? "Claude Code" : agentId} ${view}: ${shown ? "card" : "badge"}, island was ${before}`);
+  };
+
   /** Ensure the agent pill exists (no-op for Claude Code). */
 const ensurePill = () => {
   if (isExternalAgent) {
@@ -382,7 +439,10 @@ const ensurePill = () => {
     return;
   }
 
-  if (agentId === CLAUDE_ID) resolveApprovalFor(island, CLAUDE_ID, name, payload.session_id);
+  if (agentId === CLAUDE_ID) {
+    resolveApprovalFor(island, CLAUDE_ID, name, payload.session_id);
+    watchClaude();
+  }
 
   switch (name) {
     case "SessionStart":
@@ -394,6 +454,7 @@ const ensurePill = () => {
     case "UserPromptSubmit": {
   ensurePill();
   State.setFocus(agentId);
+  if (agentId === CLAUDE_ID) newClaudeTurn();
 
   State.updateTask(agentId, "thinking");
 
@@ -429,6 +490,10 @@ const ensurePill = () => {
       if (lower.includes("rate limit") || lower.includes("limite d")) {
         State.updateTask(agentId, "ratelimit");
         Sound.play("rate");
+      } else if (agentId === CLAUDE_ID &&
+          (payload.notification_type === "idle_prompt" || lower.includes("waiting for your input"))) {
+        // Sent after a minute at the prompt, also after an interrupted turn.
+        settleClaude("waiting for a prompt");
       } else if (message.endsWith("?")) {
         State.updateTask(agentId, "question");
         State.appendStep(agentId, message);
@@ -445,12 +510,7 @@ const ensurePill = () => {
   }
 
   Sound.play("finish");
-
-  if (focused) {
-    surface("finished", true);
-  } else {
-    State.setPillBadge(agentId, "finished");
-  }
+  announce("finished");
 
   window.setTimeout(() => {
     if (isExternalAgent && agentId !== "agent_codex") {
@@ -467,8 +527,7 @@ const ensurePill = () => {
     case "StopFailure":
       State.updateTask(agentId, "error");
       Sound.play("error");
-      if (focused) surface("error", true);
-      else State.setPillBadge(agentId, "error");
+      announce("error");
       break;
 
     case "SessionEnd":
