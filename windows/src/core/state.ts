@@ -100,6 +100,7 @@ export const INTEGRATION_AGENTS: AgentTask[] = [
   task("integration_claude", "Claude Code", "#D97757", "claudeCode"),
   task("agent_codex", "Codex", "#7DD3FC", "agent"),
   task("integration_vscode", "VS Code", "#A855F7", "n8n"),
+  task("integration_music", "Music", "#FA2D48", "n8n"),
   task("integration_resend", "Resend", "#22C55E", "n8n"),
   task("integration_n8n", "n8n", "#F29B38", "n8n"),
   task("integration_vercel", "Vercel", "#7C5CFF", "n8n"),
@@ -110,7 +111,7 @@ export const INTEGRATION_AGENTS: AgentTask[] = [
 ];
 
 export const TOGGLEABLE_INTEGRATION_IDS = [
-  "integration_vscode", "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
+  "integration_vscode", "integration_music", "integration_resend", "integration_n8n", "integration_vercel", "integration_github",
   "integration_notion", "integration_calcom", "integration_stripe",
 ];
 
@@ -141,6 +142,16 @@ export interface Settings {
   anthropicAuth: "claudeCode" | "apiKey";
   /** Mochi's outfit (an Outfit name); "auto" follows the seasons. */
   mochiOutfit: string;
+}
+
+export const MUSIC_ID = "integration_music";
+
+/** Windows' current media session, as music.rs reads it. */
+export interface NowPlaying {
+  title: string;
+  artist: string;
+  album: string;
+  playing: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -202,6 +213,8 @@ class AppState {
   netSpeed: { down: number; up: number } | null = null;
   /** Whose plan card replaces the left card; any navigation closes it. */
   planDetail: "claude" | "codex" | null = null;
+  /** What the Music pill's player is playing (null: nothing, or the pill is off). */
+  music: NowPlaying | null = null;
   /** The outfit under the pointer in the wardrobe, worn until it leaves. */
   wardrobePreview: Outfit | null = null;
 

@@ -11,6 +11,7 @@ mod integrations;
 mod island;
 mod launch;
 mod log;
+mod music;
 mod netspeed;
 mod openai;
 mod pipe;
@@ -232,6 +233,20 @@ fn plan_relay_apply(app: AppHandle, install: bool, fingerprint: String) -> Resul
     let backup = plan_usage::write(install, &fingerprint)?;
     let _ = app.emit("plan-relay-changed", install);
     Ok(backup)
+}
+
+/// What is playing now, for the Music pill (None until the pill is on).
+#[tauri::command]
+fn music_now() -> Option<music::NowPlaying> {
+    music::latest()
+}
+
+/// "toggle", "next" or "previous" on the player Windows shows in its flyout.
+#[tauri::command]
+async fn music_control(app: AppHandle, action: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || music::control(&app, &action))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Fresher plan numbers for the card on screen: "claude" asks Claude Code when
@@ -544,6 +559,8 @@ pub fn run() {
             plan_relay_preview,
             plan_relay_apply,
             usage_refresh,
+            music_now,
+            music_control,
             approval_decision,
             approval_ack,
             approval_decline,
@@ -594,6 +611,7 @@ pub fn run() {
             plan_usage::init(&handle);
             std::thread::spawn(|| plan_usage::refresh_codex(None, true));
             netspeed::start(handle.clone(), gate.clone());
+            music::start(handle.clone());
             pipe::start(handle.clone());
             integrations::start(handle.clone());
             Ok(())

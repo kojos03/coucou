@@ -695,6 +695,8 @@ interface IntegrationDef {
 const INTEGRATIONS: IntegrationDef[] = [
   { id: "integration_vscode", name: "VS Code", color: "#A855F7", fields: [],
     hint: "No key needed. The pill opens Visual Studio Code; it uses the code command on PATH." },
+  { id: "integration_music", name: "Music", color: "#FA2D48", fields: [],
+    hint: "No key needed. Shows what your player is playing (Spotify, Apple Music, a browser tab…) from Windows' media controls, with play, pause and skip, and Mochi dances along." },
   { id: "integration_stripe", name: "Stripe", color: "#0570DE",
     fields: [{ key: "stripe-api-key", label: "Secret key", placeholder: "sk_live_…", secret: true }] },
   { id: "integration_github", name: "GitHub", color: "#F4505E",

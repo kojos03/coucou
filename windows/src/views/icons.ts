@@ -22,6 +22,10 @@ export const ICONS = {
   chevronLeft: "M15 5.5 8.5 12 15 18.5",
   // checkmark
   check: "M5 12.5 9.5 17 19 7.5",
+  play: "M8 5.2v13.6L19 12 8 5.2z",
+  pause: "M7 5h3.6v14H7V5zm6.4 0H17v14h-3.6V5z",
+  forward: "M3.5 6v12l8-6-8-6zm9 0v12l8-6-8-6z",
+  backward: "M20.5 6v12l-8-6 8-6zm-9 0v12l-8-6 8-6z",
   // arrow.up (send)
   arrowUp: "M12 4.5 5.5 11l1.5 1.5 4-4V19.5h2V8.5l4 4L18.5 11 12 4.5z",
   // exclamationmark

@@ -723,6 +723,40 @@ rendered from the same engine code in headless Chromium (front, turned and
 mid-roll). Not verified by hand: the ⌃⌥G shortcut (shortcuts are a later port)
 and Mochi on the desktop (not ported).
 
+### 17. Music, and Mochi dances (`windows-codex`, upstream #144, #153)
+
+macOS reads Apple Music; Windows reads the session behind its own media
+controls (the volume flyout's), so the **Music** pill follows Spotify, Apple
+Music for Windows, a browser tab or any player listed there. It is off by
+default, like the other pills (Settings → Integrations; at most four).
+
+- [music.rs](../windows/src-tauri/src/music.rs) asks
+  `GlobalSystemMediaTransportControlsSessionManager` every 1.5 s, only while the
+  pill is on, for the current session's title, artist, album and whether it
+  plays, tidies them as `MusicController` does ("Song (Radio Edit) - Live" →
+  "Song", "Artist feat. X" → "Artist") and sends changes as a `music` event.
+  `music_control` plays/pauses, skips or goes back on that session. The
+  `windows` crate gains `Foundation` and `Media_Control`; the lock file does not
+  change. Linux has no reader yet: the card says so.
+- The pill is named after the song; on hover, play/pause and next slide in
+  (clicks stay on the buttons). Focused, its card shows the title, the artist,
+  and previous / play-pause / next.
+- Mochi dances (a 112 BPM hop and sway, happy eyes when nothing else is going
+  on) on the compact island and on the Music card, and the pill's mini Mochi
+  dances while the song plays, as `BotCanvasView` and `MusicPill` decide on
+  macOS. A song that starts while the island is hidden peeks it out without the
+  peek sound.
+
+Verified: `npm test` (64, four new in `tests/music.test.mjs`), `npx tsc
+--noEmit`, `cargo test -p coucou --lib --locked` (55, two new; the native read is
+`-- --ignored`), a release build. With a silent test track playing through
+Windows' media controls, the native test read "One More Time (Radio Edit)" by
+"Daft Punk feat. Romanthony" as "One More Time" by "Daft Punk", playing; in the
+running app the pill appeared as "One More Time", Mochi danced on the compact
+island (frames captured), the card showed the song and artist, and its Pause
+button paused the session (the card then offered Play). The user's own pills
+were restored afterwards. Not verified with Spotify or a browser by hand.
+
 ## Where the implementation lives
 
 | File | Responsibility |

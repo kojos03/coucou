@@ -5,7 +5,7 @@
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
-import { State, agentLabel, isWorkspace, sessionLabel, type AgentTask } from "../core/state";
+import { MUSIC_ID, State, agentLabel, isWorkspace, sessionLabel, type AgentTask } from "../core/state";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
@@ -286,6 +286,7 @@ function buildOverview(actions: ViewActions): ViewHost {
           JSON.stringify(info?.data ?? {}),
           // The usage line on the Claude Code and Codex cards.
           JSON.stringify(State.planUsage), JSON.stringify(State.codexUsage), Math.floor(nowSeconds() / 60),
+          task.id === MUSIC_ID ? JSON.stringify(State.music) : "",
         ].join("~");
         if (key !== cardKey) {
           cardKey = key;
@@ -298,7 +299,9 @@ function buildOverview(actions: ViewActions): ViewHost {
       jump.style.display = detailOpen || mode === "plan" ? "none" : "";
 
       const others = State.otherTasks.slice(0, 4);
-      const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");
+      // The Music pill is rebuilt when the track or play state changes.
+      const music = State.music ? `${State.music.title}:${State.music.playing}` : "";
+      const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}${t.id === MUSIC_ID ? `:${music}` : ""}`).join("|");
       if (pillKey !== pillIds) {
         pillIds = pillKey;
         clear(pills);
@@ -319,15 +322,32 @@ function requestUsage(kind: "claude" | "codex") {
 }
 
 function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
-  // Claude Code and Codex keep their names while the ticker shows the project.
-  const label = isWorkspace(task) ? agentLabel(task) : task.name;
+  // Claude Code and Codex keep their names while the ticker shows the project;
+  // the Music pill is named after the track (MusicController.syncTaskName).
+  const music = task.id === MUSIC_ID ? State.music : null;
+  const label = isWorkspace(task) ? agentLabel(task) : music?.title || task.name;
   const canvas = createMiniBot(task, 24);
   const pill = h(
     "div",
-    { class: "pill", onclick: () => actions.setFocus(task.id) },
+    { class: music ? "pill music" : "pill", onclick: () => actions.setFocus(task.id) },
     canvas,
     h("span", { class: "lbl", text: label }),
   );
+  if (music) {
+    // MusicPill: play/pause and next appear on hover once a track is loaded.
+    const control = (action: "toggle" | "next", icon: string, title: string) => {
+      const b = h("button", { class: "pill-music-btn", title, "aria-label": title }, svg(icon, 8));
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void Bridge.musicControl(action).catch(() => {});
+      });
+      return b;
+    };
+    pill.append(h("span", { class: "pill-music" },
+      control("toggle", music.playing ? ICONS.pause : ICONS.play, music.playing ? "Pause" : "Play"),
+      control("next", ICONS.forward, "Next"),
+    ));
+  }
   pill.style.borderColor = `${task.color}24`;
   pill.addEventListener("mouseenter", () => {
     pill.style.background = `${task.color}2e`;

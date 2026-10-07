@@ -12,7 +12,7 @@ import {
 } from "../core/layout";
 import { dominantPct, planColor } from "../core/plan";
 import { Sound } from "../core/sound";
-import { State, isWorkspace } from "../core/state";
+import { MUSIC_ID, State, isWorkspace } from "../core/state";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { parseOutfit, resolveOutfit, type Outfit } from "../mochi/outfits";
 import { Greeting } from "../mochi/greeting";
@@ -265,7 +265,7 @@ export class Island {
           break;
         case "petit":
           if (from === "coucou") this.greeting.interrupt();
-          else if (from === "hidden") Sound.play("peek");
+          else if (from === "hidden" && !this.quietReveal) Sound.play("peek");
           this.setMode("compact");
           if (from === "coucou") State.view = State.defaultView();
           if (!this.wasInIsland) this.fsm.mouseLeft();
@@ -665,6 +665,23 @@ export class Island {
     this.ensureRunning();
   }
 
+  private quietReveal = false;
+
+  /** Music started: peek out without the peek sound, as on macOS. */
+  revealQuietly() {
+    this.quietReveal = true;
+    try {
+      this.fsm.reveal();
+    } finally {
+      this.quietReveal = false;
+    }
+  }
+
+  /** True while the Music pill's player plays: its Mochis dance. */
+  private get musicPlaying(): boolean {
+    return State.music?.playing === true && State.settings.activeIntegrations.includes(MUSIC_ID);
+  }
+
   /** Mochi's wardrobe, from a right-click on him: open it, or back to the overview. */
   toggleWardrobe() {
     if (State.mode === "expanded" && State.view === "wardrobe") this.setView("overview");
@@ -822,6 +839,8 @@ export class Island {
       : settling ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
         greetingActive || this.engine.busy || UploadSeq.isActive ||
+        // The Music pill's mini Mochi dances while the player plays.
+        this.musicPlaying ||
         this.views.get(State.view)?.animating?.() === true;
 
     return busy;
@@ -883,6 +902,11 @@ export class Island {
     if (!inWardrobe) State.wardrobePreview = null;
     const wears = inWardrobe || State.mode !== "expanded" || isWorkspace(focus);
     this.engine.setOutfit(wears ? this.currentOutfit() : "none", !inWardrobe);
+    // He dances to the music on the compact island, and on the Music card;
+    // not while he has something else to say (BotCanvasView).
+    const calm = ["idle", "working", "thinking", "searching", "finished"].includes(State.effectiveState);
+    this.engine.setDancing(this.musicPlaying && calm && (State.mode === "compact" ||
+      (State.mode === "expanded" && State.view === "overview" && State.focusId === MUSIC_ID)));
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();
@@ -970,7 +994,7 @@ export class Island {
       }
     }
 
-    syncMiniBotStates(State.tasks);
+    syncMiniBotStates(State.tasks, this.musicPlaying);
     this.engine.setState(State.effectiveState);
   }
 

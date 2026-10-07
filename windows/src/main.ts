@@ -4,7 +4,7 @@ import "./style.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { reportError } from "./core/errors";
 import { Sound } from "./core/sound";
-import { State, type Settings } from "./core/state";
+import { MUSIC_ID, State, type NowPlaying, type Settings } from "./core/state";
 import type { PlanUsage } from "./core/plan";
 import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
@@ -85,6 +85,20 @@ async function main() {
     State.netSpeed = speed;
     State.notify();
   });
+
+  // The Music pill: what the player plays. Music starting peeks the island out,
+  // quietly, as on macOS.
+  const applyMusic = (now: NowPlaying | null) => {
+    const wasPlaying = State.music?.playing === true;
+    State.music = now;
+    if (now?.playing && !wasPlaying && !State.paused && State.mode === "hidden" &&
+        State.settings.activeIntegrations.includes(MUSIC_ID)) {
+      island.revealQuietly();
+    }
+    State.notify();
+  };
+  await onEvent<NowPlaying | null>("music", applyMusic);
+  State.music = (await Bridge.musicNow()) ?? null;
 
   registerHookHandlers(island);
   registerIntegrationHandlers(island);

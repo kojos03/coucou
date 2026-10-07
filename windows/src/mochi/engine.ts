@@ -175,6 +175,10 @@ export class BotEngine {
   sx = 1; sy = 1; oy = 0; ox = 0;
   tint = 0; morph = 0; hands = 0; blush = 0; es = 1; badgeS = 0;
 
+  /** Music is playing and Mochi may dance; the level fades in and out. */
+  isDancing = false;
+  dancingLevel = 0;
+
   /** What Mochi wears, and how far into its entrance (0 hidden, 1 on). */
   outfit: Outfit = "none";
   outfitPresence = 0;
@@ -361,6 +365,10 @@ export class BotEngine {
     }
   }
 
+  setDancing(on: boolean) {
+    this.isDancing = on;
+  }
+
   /** True while an outfit is on screen (the rigid roll and eye rules follow it). */
   private get wearing(): boolean {
     return this.outfit !== "none" && !this.isMini && this.outfitPresence > 0.05;
@@ -516,6 +524,7 @@ export class BotEngine {
       Math.abs(this.col[0] - this.colT[0]) > 0.003 ||
       Math.abs(this.col[1] - this.colT[1]) > 0.003 ||
       Math.abs(this.col[2] - this.colT[2]) > 0.003 ||
+      this.dancingLevel > 0 || this.isDancing ||
       (this.outfit !== "none" && (
         Math.abs(this.physDx - this.physTx) > 0.003 || Math.abs(this.physDy - this.physTy) > 0.003 ||
         Math.abs(this.physVx) > 0.01 || Math.abs(this.physVy) > 0.01))
@@ -647,6 +656,11 @@ export class BotEngine {
     this.slotHVel += acc * dt;
     this.slotH = Math.max(0, this.slotH + this.slotHVel * dt);
 
+    // Dance level: in over 0.3 s, out over 0.5 s.
+    const danceTarget = this.isDancing ? 1 : 0;
+    if (this.dancingLevel < danceTarget) this.dancingLevel = Math.min(danceTarget, this.dancingLevel + dt / 0.3);
+    else if (this.dancingLevel > danceTarget) this.dancingLevel = Math.max(danceTarget, this.dancingLevel - dt / 0.5);
+
     // Spring lag for the outfit's soft parts; a rigid roll flings them outward.
     if (dt > 0) {
       const yawVel = (this.yaw - this.prevYaw) / dt;
@@ -715,6 +729,21 @@ export class BotEngine {
     const cx = W / 2 + this.ox * R;
     const cy = H / 2 + this.particleOverhang / 2 + this.oy * R + R * 0.06;
 
+    // Dancing: a 112 BPM hop and sway around the bottom of the body, applied to
+    // everything below, badge and particles included (BotEngine.applyDance).
+    x.save();
+    if (this.dancingLevel > 0.001) {
+      const px = cx, py = cy + R * 0.88;
+      const beat = (now() * 112) / 60;
+      const hop = Math.abs(Math.sin(Math.PI * beat));
+      const land = Math.pow(1 - hop, 6);
+      const l = this.dancingLevel;
+      x.translate(px + 0.08 * R * Math.sin(Math.PI * beat) * l, py - 0.2 * R * hop * l);
+      x.rotate(0.1 * Math.sin(Math.PI * beat) * l);
+      x.scale(1 + 0.045 * land * l, 1 - 0.06 * land * l);
+      x.translate(-px, -py);
+    }
+
     // With an outfit on, a roll turns the whole of Mochi, outfit included;
     // without one, only his eyes roll through (the illusion in drawEyes).
     const dressed = this.outfit !== "none" && !this.isMini;
@@ -771,6 +800,7 @@ export class BotEngine {
       this.drawBadge(x, this.badge, R, cx, cy);
     }
     this.drawParticles(x, R, cx, cy);
+    x.restore();
   }
 
   private bodyPath(rx: number, ry: number, R: number): Path2D {
@@ -841,6 +871,10 @@ export class BotEngine {
 
   private drawEyes(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
     let shape: EyeShape = this.eyeOverride ?? this.cfg.eye;
+    // Happy eyes while he dances, when nothing else is going on.
+    if (this.isDancing && this.dancingLevel > 0.15 && !this.isMini && (this.state === "idle" || this.state === "finished")) {
+      shape = "happy";
+    }
     if (this.morph > 0.5) {
       if (this.isChewing) shape = "happy";
       else if (this.slotHTarget > 0.05 || this.slotH > 0.1) shape = "cup";

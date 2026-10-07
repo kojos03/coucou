@@ -55,6 +55,7 @@ installs for the current user only — no admin prompt.
 | Click the small island | It opens |
 | Click Mochi | It gets annoyed. Three times in a row and it goes dizzy |
 | Rest the pointer on Mochi for two seconds | Hearts |
+| Turn on the **Music** pill (Settings → Integrations) | The pill names the song playing in any player Windows shows in its media controls (Spotify, Apple Music, a browser tab…), with play/pause and next on hover; its card adds the artist and previous. Mochi dances along on the small island and on the Music card |
 | Right-click Mochi | His wardrobe: hover an outfit to try it on, click to keep it. **Auto** follows the seasons (a witch hat in October, a Santa hat in December…) |
 | Drag a file onto the island | Mochi turns into a box, swallows it, then offers to answer questions about it |
 | `Esc` | Closes the island |

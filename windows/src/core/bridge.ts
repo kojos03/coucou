@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { ChatProvider, Settings } from "./state";
+import type { ChatProvider, NowPlaying, Settings } from "./state";
 import type { PlanUsage } from "./plan";
 
 export const IS_TAURI =
@@ -35,6 +35,10 @@ export const Bridge = {
   boot: () => call<BootInfo>("boot"),
 
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
+  /** What the Music pill's player is playing now. */
+  musicNow: () => call<NowPlaying | null>("music_now"),
+  /** Play/pause, next or previous on that player. */
+  musicControl: (action: "toggle" | "next" | "previous") => callOrThrow<void>("music_control", { action }),
 
   /** Shrink the window down to the invisible wake strip (hidden) or back to full. */
   setCollapsed: (collapsed: boolean) => call<void>("set_collapsed", { collapsed }),

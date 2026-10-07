@@ -128,14 +128,16 @@ function idleCard(
   const error = info?.error ?? null;
   const codex = task.id === "agent_codex";
   const vscode = task.id === "integration_vscode";
+  const music = task.id === "integration_music";
   // The Claude Code and Codex pills are about hooks, not a key — the macOS
-  // wording would be misleading here. VS Code needs neither.
+  // wording would be misleading here. VS Code and Music need neither.
   const missing = task.id === "integration_claude" ? "Hooks not installed"
-    : vscode ? "Not installed" : "Key not configured";
+    : vscode ? "Not installed" : music ? "Not available on this system yet" : "Key not configured";
   const [codexLabel, codexColor] = codexStatus(configured, (info?.data ?? {}) as Record<string, unknown>);
   const label = error ?? (codex ? codexLabel
     : !configured ? missing
     : vscode ? "Installed"
+    : music ? "Not playing"
     // Claude Code's card has nothing to load: the hooks are either in or not.
     : task.id === "integration_claude" ? "Connected" : "Connected · loading…");
   const statusColor = error ? "#F4505E" : codex ? codexColor : configured ? "#22C55E" : "#F4505E";
@@ -190,8 +192,9 @@ function idleCard(
       }),
     );
   }
-  if (vscode) {
-    // Nothing to configure or refresh: VS Code only has to be installed.
+  if (vscode || music) {
+    // Nothing to configure or refresh: VS Code only has to be installed, and
+    // Music reads whatever player Windows shows.
   } else if (configured) {
     actions.append(
       h("button", {
@@ -518,7 +521,33 @@ export function hasIntegrationData(id: string): boolean {
   }
 }
 
+// ── Music ───────────────────────────────────────────────────────────────────
+
+/** MusicCardView: the track, its artist, and back / play-pause / next. */
+function musicCard(): HTMLElement {
+  const now = State.music!;
+  const control = (action: "toggle" | "next" | "previous", icon: string, label: string, accent: boolean) =>
+    h("button", {
+      class: accent ? "music-btn accent" : "music-btn",
+      title: label,
+      "aria-label": label,
+      onclick: () => void Bridge.musicControl(action).catch(() => {}),
+    }, svg(icon, 11));
+  return h(
+    "div",
+    { class: "int-card music-card" },
+    h("div", { class: "music-title" }, dot("#FA2D48", 7), h("b", { text: now.title })),
+    now.artist ? h("div", { class: "music-artist", text: now.artist }) : null,
+    h("div", { class: "music-controls" },
+      control("previous", ICONS.backward, "Previous", false),
+      control("toggle", now.playing ? ICONS.pause : ICONS.play, now.playing ? "Pause" : "Play", true),
+      control("next", ICONS.forward, "Next", false),
+    ),
+  );
+}
+
 export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHooks): HTMLElement {
+  if (task.id === "integration_music" && State.music) return musicCard();
   if (task.id === "integration_n8n") {
     const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
     return hooks.detailOpen && hasActivity

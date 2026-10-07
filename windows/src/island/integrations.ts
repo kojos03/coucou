@@ -56,6 +56,10 @@ export async function refreshConfigured() {
   State.integrations.integration_claude = { ...claude, configured: hooks };
   const vscode = await Bridge.vscodeInstalled().catch(() => null);
   State.integrations.integration_vscode = { data: {}, error: null, loaded: false, configured: vscode === true };
+  // Music needs no key: Windows' media controls are always there (not on Linux yet).
+  State.integrations.integration_music = {
+    data: {}, error: null, loaded: true, configured: /Windows/.test(navigator.userAgent),
+  };
   State.notify();
   await refreshCodexHooks();
 }
