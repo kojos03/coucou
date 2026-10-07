@@ -15,6 +15,7 @@ import { renderPlanCard } from "./plan";
 import { nowSeconds } from "../core/plan";
 import { formatSpeed } from "../core/net";
 import { Bridge } from "../core/bridge";
+import { OUTFITS, drawOutfitIcon, outfitName, parseOutfit, seasonalOutfit, type Outfit } from "../mochi/outfits";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -31,6 +32,9 @@ export interface ViewActions {
   openUrl(url: string): void;
   decide(d: "allow" | "deny"): void;
   toggleSound(): void;
+  /** The wardrobe: keep this outfit, or wear it while the pointer is over it. */
+  pickOutfit(outfit: Outfit): void;
+  previewOutfit(outfit: Outfit | null): void;
   setVolume(v: number): void;
   setAutoClose(seconds: number): void;
   openSettingsWindow(): void;
@@ -585,6 +589,74 @@ function buildSettings(actions: ViewActions): ViewHost {
   };
 }
 
+// ── Wardrobe ──────────────────────────────────────────────────────────────────
+
+const TILE = 30;
+
+/** "Auto · Witch hat": what the header says for the hovered or chosen outfit. */
+export function wardrobeLabel(hovered: Outfit | null, selected: Outfit, today: Date): string {
+  const season = seasonalOutfit(today);
+  const seasonName = season === "none" ? "None" : outfitName(season);
+  if (hovered === "auto") return `Auto · follows the seasons (now: ${seasonName})`;
+  if (hovered) return outfitName(hovered);
+  return selected === "auto" ? `Auto · ${seasonName}` : outfitName(selected);
+}
+
+/** WardrobeView: Mochi on the left, a row of outfits; hover to try, click to keep. */
+function buildWardrobe(actions: ViewActions): ViewHost {
+  const label = h("span", { class: "wardrobe-label" });
+  const grid = h("div", { class: "wardrobe-grid" });
+  let hovered: Outfit | null = null;
+  const tiles = OUTFITS.map((outfit) => {
+    const canvas = h("canvas", { class: "outfit-icon" }) as HTMLCanvasElement;
+    const tile = h("button", {
+      class: "outfit-tile",
+      title: outfitName(outfit),
+      "aria-label": outfitName(outfit),
+      onclick: () => actions.pickOutfit(outfit),
+    }, canvas);
+    tile.addEventListener("mouseenter", () => {
+      hovered = outfit;
+      actions.previewOutfit(outfit === "auto" ? seasonalOutfit(new Date()) : outfit);
+    });
+    tile.addEventListener("mouseleave", () => {
+      if (hovered !== outfit) return;
+      hovered = null;
+      actions.previewOutfit(null);
+    });
+    grid.append(tile);
+    return { outfit, tile, canvas };
+  });
+  let paintedFor = "";
+  const el = h("div", { class: "view wardrobe" },
+    h("div", { class: "wardrobe-head" }, h("span", { class: "wardrobe-title", text: "Wardrobe" }), label),
+    grid);
+
+  return {
+    el,
+    sync() {
+      const today = new Date();
+      const selected = parseOutfit(State.settings.mochiOutfit);
+      label.textContent = wardrobeLabel(hovered, selected, today);
+      for (const t of tiles) t.tile.classList.toggle("selected", t.outfit === selected);
+      // The icons only change with the season (Auto) and the screen's scale.
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const season = seasonalOutfit(today);
+      if (paintedFor === `${season}@${dpr}`) return;
+      paintedFor = `${season}@${dpr}`;
+      for (const t of tiles) {
+        t.canvas.width = Math.round(TILE * dpr);
+        t.canvas.height = Math.round(TILE * dpr);
+        const ctx = t.canvas.getContext("2d");
+        if (!ctx) continue;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, TILE, TILE);
+        drawOutfitIcon(ctx, TILE, t.outfit, season);
+      }
+    },
+  };
+}
+
 // ── Placeholders filled in later stages ───────────────────────────────────────
 
 function buildPlaceholder(title: string, sub: string): ViewHost {
@@ -613,6 +685,7 @@ export function buildViews(
   map.set("confused", buildConfused());
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
+  map.set("wardrobe", buildWardrobe(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());

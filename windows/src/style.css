@@ -1504,3 +1504,77 @@ button.int-usage:hover .g b {
 .int-card.detail {
   padding-top: 8px;
 }
+
+/* ── Wardrobe (WardrobeView.swift) ──────────────────────────────────────────
+   Mochi stays on the left; a row of outfits. Hover tries one on, click keeps it. */
+
+.view.wardrobe {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 12px 0 108px;
+}
+
+.wardrobe-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 10px;
+  min-width: 0;
+}
+
+.wardrobe-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f5f6f8;
+}
+
+.wardrobe-label {
+  margin-left: auto;
+  min-width: 0;
+  font-size: 11px;
+  color: #8e939c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wardrobe-grid {
+  display: grid;
+  grid-template-columns: repeat(14, 30px);
+  gap: 5px;
+  padding: 6px 8px;
+}
+
+.outfit-tile {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.outfit-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.outfit-tile:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.outfit-tile.selected::after {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.outfit-icon {
+  display: block;
+  width: 30px;
+  height: 30px;
+}

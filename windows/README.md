@@ -55,6 +55,7 @@ installs for the current user only — no admin prompt.
 | Click the small island | It opens |
 | Click Mochi | It gets annoyed. Three times in a row and it goes dizzy |
 | Rest the pointer on Mochi for two seconds | Hearts |
+| Right-click Mochi | His wardrobe: hover an outfit to try it on, click to keep it. **Auto** follows the seasons (a witch hat in October, a Santa hat in December…) |
 | Drag a file onto the island | Mochi turns into a box, swallows it, then offers to answer questions about it |
 | `Esc` | Closes the island |
 | Tray icon | Open, Settings…, Pause, Quit |

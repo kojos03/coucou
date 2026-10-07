@@ -31,6 +31,10 @@ pub struct Settings {
     /// a Claude plan) or "apiKey" (an Anthropic API key in the credential store).
     #[serde(default = "default_anthropic_auth")]
     pub anthropic_auth: String,
+    /// Mochi's outfit, picked in the island's wardrobe: an outfit name, or
+    /// "auto" to follow the seasons.
+    #[serde(default = "default_mochi_outfit")]
+    pub mochi_outfit: String,
 }
 
 fn default_model() -> String {
@@ -47,6 +51,10 @@ fn default_openai_auth() -> String {
 
 fn default_anthropic_auth() -> String {
     "claudeCode".to_string()
+}
+
+fn default_mochi_outfit() -> String {
+    "auto".to_string()
 }
 
 impl Default for Settings {
@@ -69,6 +77,7 @@ impl Default for Settings {
             openai_model: default_openai_model(),
             openai_auth: default_openai_auth(),
             anthropic_auth: default_anthropic_auth(),
+            mochi_outfit: default_mochi_outfit(),
         }
     }
 }

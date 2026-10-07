@@ -3,6 +3,7 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
 import type { PlanUsage } from "./plan";
+import type { Outfit } from "../mochi/outfits";
 
 export type AgentSource = "claudeCode" | "n8n" | "agent";
 /** Whose brain answers the chat: Codex's Mochi uses OpenAI, the others Anthropic. */
@@ -138,6 +139,8 @@ export interface Settings {
   openaiAuth: "codex" | "apiKey";
   /** Claude's Mochi signs in through Claude Code (Claude plan) or an API key. */
   anthropicAuth: "claudeCode" | "apiKey";
+  /** Mochi's outfit (an Outfit name); "auto" follows the seasons. */
+  mochiOutfit: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -155,6 +158,7 @@ export const DEFAULT_SETTINGS: Settings = {
   openaiModel: "gpt-6.1-sol",
   openaiAuth: "codex",
   anthropicAuth: "claudeCode",
+  mochiOutfit: "auto",
 };
 
 type Listener = () => void;
@@ -198,6 +202,8 @@ class AppState {
   netSpeed: { down: number; up: number } | null = null;
   /** Whose plan card replaces the left card; any navigation closes it. */
   planDetail: "claude" | "codex" | null = null;
+  /** The outfit under the pointer in the wardrobe, worn until it leaves. */
+  wardrobePreview: Outfit | null = null;
 
   usageFor(kind: "claude" | "codex"): PlanUsage | null {
     return kind === "claude" ? this.planUsage : this.codexUsage;

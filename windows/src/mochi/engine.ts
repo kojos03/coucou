@@ -7,6 +7,7 @@
 import { Ease, lerp, type EaseFn } from "../core/anim";
 import { Sound } from "../core/sound";
 import type { BotEmoteName, BotStateName } from "../core/layout";
+import { drawOutfitBehind, drawOutfitFront, mochiH, type Outfit } from "./outfits";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ interface Tween {
 
 type PropKey =
   | "yaw" | "pitch" | "roll" | "tilt" | "open" | "sx" | "sy"
-  | "oy" | "ox" | "tint" | "morph" | "hands" | "blush" | "es" | "badgeS";
+  | "oy" | "ox" | "tint" | "morph" | "hands" | "blush" | "es" | "badgeS" | "outfitPresence";
 
 interface BotStateCfg {
   color: RGB;
@@ -173,6 +174,19 @@ export class BotEngine {
   yaw = 0; pitch = 0; roll = 0; tilt = 0; open = 1;
   sx = 1; sy = 1; oy = 0; ox = 0;
   tint = 0; morph = 0; hands = 0; blush = 0; es = 1; badgeS = 0;
+
+  /** What Mochi wears, and how far into its entrance (0 hidden, 1 on). */
+  outfit: Outfit = "none";
+  outfitPresence = 0;
+  private outfitTarget: Outfit = "none";
+  /** Turns in the current roll, so hats can time their hop over it. */
+  rollTurns = 1;
+
+  // Spring lag for soft parts (pompoms, hat tips, the scarf's end), −1…1.
+  physDx = 0; physDy = 0;
+  private physVx = 0; private physVy = 0;
+  private physTx = 0; private physTy = 0;
+  private prevYaw = 0; private prevOy = 0; private prevRoll = 0;
 
   // Targets
   tgYaw = 0; tgPitch = 0; tgTilt = 0; tgSy = 1; tgSx = 1; tgEs = 1;
@@ -316,7 +330,40 @@ export class BotEngine {
 
   doRoll(durationMs: number, turns: number) {
     this.roll = 0;
+    this.rollTurns = turns;
     this.anim("roll", [[Math.PI * 2 * turns, durationMs, Ease.inOut]], () => { this.roll = 0; });
+  }
+
+  /**
+   * Puts on, swaps or takes off an outfit, as BotEngine.setOutfit: out in
+   * 180 ms, in over 350 ms with a squash. Unanimated in the wardrobe, so a
+   * preview follows the pointer.
+   */
+  setOutfit(next: Outfit, animated = true) {
+    if (next === this.outfitTarget) return;
+    this.outfitTarget = next;
+    this.tweens.delete("outfitPresence");
+    this.locks.delete("outfitPresence");
+    if (!animated) {
+      this.outfit = next;
+      this.outfitPresence = next !== "none" ? 1 : 0;
+    } else if (next === "none") {
+      this.anim("outfitPresence", [[0, 180, Ease.inOut]], () => { this.outfit = "none"; });
+    } else if (this.outfit === "none") {
+      this.outfit = next;
+      this.outfitPresence = 0;
+      this.anim("outfitPresence", [[1, 350, Ease.inOut]], () => this.squash());
+    } else {
+      this.anim("outfitPresence", [[0, 180, Ease.inOut]], () => {
+        this.outfit = next;
+        this.anim("outfitPresence", [[1, 350, Ease.inOut]], () => this.squash());
+      });
+    }
+  }
+
+  /** True while an outfit is on screen (the rigid roll and eye rules follow it). */
+  private get wearing(): boolean {
+    return this.outfit !== "none" && !this.isMini && this.outfitPresence > 0.05;
   }
 
   /** Peek wave — the "coucou". Timings from BotEngine.greet(). */
@@ -468,7 +515,10 @@ export class BotEngine {
       this.slotH > 0.001 || Math.abs(this.slotHVel) > 0.001 ||
       Math.abs(this.col[0] - this.colT[0]) > 0.003 ||
       Math.abs(this.col[1] - this.colT[1]) > 0.003 ||
-      Math.abs(this.col[2] - this.colT[2]) > 0.003
+      Math.abs(this.col[2] - this.colT[2]) > 0.003 ||
+      (this.outfit !== "none" && (
+        Math.abs(this.physDx - this.physTx) > 0.003 || Math.abs(this.physDy - this.physTy) > 0.003 ||
+        Math.abs(this.physVx) > 0.01 || Math.abs(this.physVy) > 0.01))
     );
   }
 
@@ -597,6 +647,24 @@ export class BotEngine {
     this.slotHVel += acc * dt;
     this.slotH = Math.max(0, this.slotH + this.slotHVel * dt);
 
+    // Spring lag for the outfit's soft parts; a rigid roll flings them outward.
+    if (dt > 0) {
+      const yawVel = (this.yaw - this.prevYaw) / dt;
+      const oyVel = (this.oy - this.prevOy) / dt;
+      const rollVel = (this.roll - this.prevRoll) / dt;
+      this.prevYaw = this.yaw;
+      this.prevOy = this.oy;
+      this.prevRoll = this.roll;
+      const centrifugal = this.outfit !== "none" && this.outfitPresence > 0.05 ? rollVel * 0.18 : 0;
+      this.physTx = Math.max(-1, Math.min(1, -yawVel * 0.35 - this.tilt * 2 + centrifugal));
+      this.physTy = Math.max(-1, Math.min(1, oyVel * 0.5));
+      const stiff = 60, damp = 9;
+      this.physVx += (stiff * (this.physTx - this.physDx) - damp * this.physVx) * dt;
+      this.physVy += (stiff * (this.physTy - this.physDy) - damp * this.physVy) * dt;
+      this.physDx += this.physVx * dt;
+      this.physDy += this.physVy * dt;
+    }
+
     this.lastTime = n;
   }
 
@@ -647,7 +715,27 @@ export class BotEngine {
     const cx = W / 2 + this.ox * R;
     const cy = H / 2 + this.particleOverhang / 2 + this.oy * R + R * 0.06;
 
+    // With an outfit on, a roll turns the whole of Mochi, outfit included;
+    // without one, only his eyes roll through (the illusion in drawEyes).
+    const dressed = this.outfit !== "none" && !this.isMini;
+    const rigid = this.wearing && Math.abs(this.roll) > 0.001;
+    x.save();
+    if (rigid) {
+      x.translate(cx, cy);
+      x.rotate(this.roll);
+      x.translate(-cx, -cy);
+    }
+
     this.drawHandsBehind(x, R, rx, ry, cx, cy);
+
+    const outfitH = dressed
+      ? mochiH(R, this.yaw, this.pitch, this.physDx, this.physDy, this.outfitPresence > 0.05 ? 0 : this.roll)
+      : null;
+    const pose = {
+      cx, cy, tilt: this.tilt, sx: this.sx, sy: this.sy,
+      morph: this.morph, presence: this.outfitPresence, rollTurns: this.rollTurns,
+    };
+    if (outfitH) drawOutfitBehind(x, this.outfit, outfitH, pose);
 
     x.save();
     x.translate(cx, cy);
@@ -674,6 +762,9 @@ export class BotEngine {
     this.drawEyes(x, body, R, rx, ry);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
 
+    x.restore();
+
+    if (outfitH) drawOutfitFront(x, this.outfit, outfitH, pose);
     x.restore();
 
     if (this.badge && this.badgeS > 0.01 && this.morph < 0.25) {
@@ -711,15 +802,17 @@ export class BotEngine {
   }
 
   private drawBody(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
-    if (this.bodyColor) {
+    // The pumpkin outfit is Mochi himself, turned orange.
+    const pumpkin = this.outfit === "pumpkin" && !this.isMini;
+    if (this.bodyColor && !pumpkin) {
       // Mini bots: flat solid fill — no gradient, no reflection, no highlight
       x.fillStyle = rgba(this.bodyColor, 1);
       x.fill(body);
       return;
     }
     const g = x.createLinearGradient(rx * 0.7, -ry * 0.85, -rx * 0.8, ry * 0.9);
-    g.addColorStop(0, rgba(BASE_TOP));
-    g.addColorStop(1, rgba(BASE_BOTTOM));
+    g.addColorStop(0, pumpkin ? "#FFA94D" : rgba(BASE_TOP));
+    g.addColorStop(1, pumpkin ? "#E8590C" : rgba(BASE_BOTTOM));
     x.fillStyle = g;
     x.fill(body);
 
@@ -761,7 +854,8 @@ export class BotEngine {
 
     for (const sd of [-1, 1]) {
       const eyeYaw = sd * EYE_SP + this.yaw;
-      let eyePitch = EYE_P + this.pitch + this.roll;
+      // A rigid roll already turns the whole body; the eyes add no roll of their own.
+      let eyePitch = EYE_P + this.pitch + (this.wearing ? 0 : this.roll);
       eyePitch = (((eyePitch + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
       const cp = Math.cos(eyePitch);
       if (Math.cos(eyeYaw) * cp <= 0.04) continue;

@@ -12,8 +12,9 @@ import {
 } from "../core/layout";
 import { dominantPct, planColor } from "../core/plan";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, isWorkspace } from "../core/state";
 import { BotEngine, hexToRGB } from "../mochi/engine";
+import { parseOutfit, resolveOutfit, type Outfit } from "../mochi/outfits";
 import { Greeting } from "../mochi/greeting";
 import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
 import { UploadCanvas } from "../upload/canvas";
@@ -181,6 +182,18 @@ export class Island {
       },
       openSettingsWindow: () => void Bridge.openSettingsWindow(),
       blip: () => Sound.play("blip"),
+      pickOutfit: (outfit) => {
+        if (State.settings.mochiOutfit === outfit) return;
+        State.settings.mochiOutfit = outfit;
+        void Bridge.saveSettings(State.settings);
+        Sound.play("pop");
+        this.engine.triggerEmote("proud");
+        State.notify();
+      },
+      previewOutfit: (outfit) => {
+        State.wardrobePreview = outfit;
+        State.notify();
+      },
     };
 
     this.wakeStrip = h("div", { id: "wake-strip" });
@@ -557,6 +570,12 @@ export class Island {
     this.islandEl.addEventListener("mousedown", (e) => {
       Sound.resume();
       State.lastActivity = performance.now();
+      // Right-click on Mochi opens his wardrobe, as on macOS.
+      if (e.button === 2 && State.mode !== "hidden" && this.isBotHit(e.clientX, e.clientY)) {
+        this.cancelBotHover();
+        this.toggleWardrobe();
+        return;
+      }
       if (State.mode !== "expanded") {
         this.fsm.click();
         return;
@@ -567,7 +586,16 @@ export class Island {
       }
     });
 
+    // No browser menu over Mochi: his right-click is the wardrobe.
+    this.islandEl.addEventListener("contextmenu", (e) => {
+      if (this.isBotHit(e.clientX, e.clientY)) e.preventDefault();
+    });
+
     window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && State.mode === "expanded" && State.view === "wardrobe") {
+        this.setView("overview");
+        return;
+      }
       if (e.key === "Escape" && State.mode === "expanded" && !State.isPinned) this.collapse();
       State.lastActivity = performance.now();
     });
@@ -635,6 +663,17 @@ export class Island {
     }
 
     this.ensureRunning();
+  }
+
+  /** Mochi's wardrobe, from a right-click on him: open it, or back to the overview. */
+  toggleWardrobe() {
+    if (State.mode === "expanded" && State.view === "wardrobe") this.setView("overview");
+    else this.expand("wardrobe");
+  }
+
+  /** What Mochi wears now: the wardrobe's preview, else the saved choice. */
+  private currentOutfit(): Outfit {
+    return State.wardrobePreview ?? resolveOutfit(parseOutfit(State.settings.mochiOutfit), new Date());
   }
 
   private isBotHit(x: number, y: number): boolean {
@@ -837,6 +876,13 @@ export class Island {
     this.engine.bodyColor = State.planDetail && State.view === "overview"
       ? hexToRGB(planColor(dominantPct(State.usageFor(State.planDetail))))
       : focus?.isIntegration ? hexToRGB(focus.color) : null;
+    // The outfit: on Claude Code's and Codex's Mochi, on the compact island, and
+    // always in the wardrobe; never over an integration's card (macOS: the main
+    // pill only). Instant in the wardrobe, so a preview follows the pointer.
+    const inWardrobe = State.mode === "expanded" && State.view === "wardrobe";
+    if (!inWardrobe) State.wardrobePreview = null;
+    const wears = inWardrobe || State.mode !== "expanded" || isWorkspace(focus);
+    this.engine.setOutfit(wears ? this.currentOutfit() : "none", !inWardrobe);
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();

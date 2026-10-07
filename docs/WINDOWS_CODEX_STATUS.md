@@ -685,6 +685,44 @@ Code, the ten-minute timer in the app, and whether the extension sends
 `idle_prompt`. One session at 18:34 on 6 October (tool calls, no `Stop`, no
 transcript, not in the VS Code log) is unexplained.
 
+### 16. Mochi's wardrobe (`windows-codex`, upstream #195)
+
+Right-click Mochi and the island opens his wardrobe, as on macOS: Auto, None
+and eleven outfits drawn in code (party hat, beanie, crown, sunglasses, round
+glasses, bow, scarf, witch hat, pumpkin, Santa hat, bunny ears). Hovering a tile
+tries it on; a click keeps it (`pop` and a proud Mochi), saved as
+`mochiOutfit` in `settings.json`. **Auto** follows the seasons with upstream's
+dates (party hat 31 Dec–2 Jan, Santa hat 1–26 Dec, witch hat 1 Oct–1 Nov, bunny
+ears Good Friday–Easter Monday, sunglasses 21 Jun–31 Aug). `Esc` or a second
+right-click goes back to the overview.
+
+- [outfits.ts](../windows/src/mochi/outfits.ts) ports `MochiWardrobe.swift` and
+  `MochiOutfitDrawing.swift` to Canvas 2D: the head model, every outfit, the
+  wardrobe icons. A SwiftUI context copy is a `save`/`restore` pair; its
+  `drawLayer` is an offscreen layer, so a fading outfit never shows through
+  itself.
+- The engine gains the outfit's entrance and exit (180 ms out, 350 ms in with a
+  squash), the spring that makes pompoms, hat tips and the scarf's end trail
+  behind, the rigid roll (with an outfit on, the whole of Mochi turns), and the
+  pumpkin's orange body.
+- Who wears it: Claude Code's and Codex's Mochis, the compact island, and the
+  wardrobe; integration cards and mini bots never do. macOS dresses only its
+  main pill; Windows has two working Mochis, so both are dressed.
+- Upstream's Easter rule compares times of day, which includes the Thursday
+  before Good Friday from midnight; the port compares calendar days, which is
+  what upstream's own tests expect.
+
+Verified: `npm test` (60, five new in `tests/wardrobe.test.mjs`: the seasons,
+every outfit drawn front and behind, entering, rolling, turned away and tiny,
+the engine's transitions and spring, the wardrobe view), `npx tsc --noEmit`,
+`cargo test -p coucou --lib --locked` (53), a release build; in the running
+app a right-click on Mochi opened the wardrobe with its 13 tiles and "Auto ·
+Witch hat", hovering tried the party hat on, and the witch hat showed on both
+the Claude Code and Codex Mochis in the overview. Every outfit was also
+rendered from the same engine code in headless Chromium (front, turned and
+mid-roll). Not verified by hand: the ⌃⌥G shortcut (shortcuts are a later port)
+and Mochi on the desktop (not ported).
+
 ## Where the implementation lives
 
 | File | Responsibility |
