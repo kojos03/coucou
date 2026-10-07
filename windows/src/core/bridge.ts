@@ -110,6 +110,13 @@ export const Bridge = {
   codexHooksApply: (install: boolean, fingerprint: string) =>
     callOrThrow<string>("codex_hooks_apply", { install, fingerprint }),
 
+  // ── Copilot CLI hooks (~/.copilot/hooks/coucou.json) ──────────────────────
+  copilotHooksStatus: () => call<CodexHookStatus>("copilot_hooks_status"),
+  copilotHooksPreview: (install: boolean) => callOrThrow<HookPreview>("copilot_hooks_preview", { install }),
+  /** Returns the backup path, or "" when there was nothing to back up. */
+  copilotHooksApply: (install: boolean, fingerprint: string) =>
+    callOrThrow<string>("copilot_hooks_apply", { install, fingerprint }),
+
   approvalDecision: (requestId: string, decision: "allow" | "deny") =>
     call<void>("approval_decision", { requestId, decision }),
   /** "The card is up" — until this lands the relay only waits a moment. */
@@ -202,10 +209,11 @@ export interface HookStatus {
   lastEvent?: number | null;
 }
 
+/** An agent's hook file: Codex's hooks.json, Copilot CLI's coucou.json. */
 export interface CodexHookStatus {
   path: string;
   exists: boolean;
-  /** Why hooks.json cannot be used as it is (unreadable, invalid JSON…). */
+  /** Why the file cannot be used as it is (unreadable, invalid JSON…). */
   problem: string | null;
   hookPath: string;
   hookReady: boolean;

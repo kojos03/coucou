@@ -35,7 +35,8 @@ function fixture() {
     vm.runInNewContext(compiled, context, { filename: file });
     return exports;
   }
-  const { State } = load(resolve(root, 'core/state.ts'));
+  const stateModule = load(resolve(root, 'core/state.ts'));
+  const { State } = stateModule;
   State.loadIntegrationTasks();
   const island = {
     alert(view) { State.view = view; State.mode = 'expanded'; },
@@ -51,7 +52,7 @@ function fixture() {
     turn_id: turn, cwd: `C:/${session}`, ...extra,
   });
   const task = () => State.tasks.find((entry) => entry.id === 'agent_codex');
-  return { State, send, task, sounds, timers, declined, acked, logs, listener, listeners, hooks };
+  return { State, stateModule, send, task, sounds, timers, declined, acked, logs, listener, listeners, hooks };
 }
 
 test('repeated turn clears completion, badge and old steps, and returns to overview', () => {
@@ -486,4 +487,75 @@ test('Codex tool steps read like the macOS ticker, and rate limits sound once', 
   f.send('Notification', 'a', 'a1', { message: 'Rate limit reached' });
   assert.equal(f.task().state, 'ratelimit');
   assert.deepEqual(f.sounds.filter((sound) => sound === 'rate'), ['rate']);
+});
+
+test('Copilot CLI and Muse Code get their own pills, named and coloured as on macOS', () => {
+  const f = fixture();
+  f.listener({ coucou_agent: 'copilot', hook_event_name: 'UserPromptSubmit', session_id: 'c', cwd: 'C:/work/site', prompt: 'add tests' });
+  const copilot = f.State.tasks.find((t) => t.id === 'agent_copilot');
+  assert.equal(copilot.name, 'Copilot CLI');
+  assert.equal(copilot.color, '#818CF8');
+  assert.equal(copilot.state, 'thinking');
+  assert.equal(copilot.sessionCwd, 'C:/work/site');
+  assert.equal(f.State.focusId, 'agent_copilot');
+  f.listener({ coucou_agent: 'copilot', hook_event_name: 'PreToolUse', session_id: 'c', tool_name: 'bash', tool_input: { command: 'npm test' } });
+  assert.equal(copilot.state, 'working');
+  assert.match(copilot.steps.at(-1), /npm test/);
+  f.listener({ coucou_agent: 'muse', hook_event_name: 'SessionStart', session_id: 'm', cwd: '/home/me/app' });
+  const muse = f.State.tasks.find((t) => t.id === 'agent_muse');
+  assert.equal(muse.name, 'Muse Code');
+  assert.equal(muse.color, '#38BDF8');
+  // Their cards read "Copilot CLI · Agent", as macOS's catalog labels them.
+  assert.equal(f.stateModule.sessionLabel(copilot), 'Agent');
+  assert.equal(f.stateModule.sessionLabel(muse), 'Agent');
+  // Other agents keep the generic name.
+  f.listener({ coucou_agent: 'my-bot', hook_event_name: 'SessionStart', session_id: 'x' });
+  const bot = f.State.tasks.find((t) => t.id === 'agent_my-bot');
+  assert.equal(bot.name, 'My-bot');
+  assert.equal(f.stateModule.sessionLabel(bot), 'My-bot');
+});
+
+test('a Copilot CLI permission request gets the card, and gives the pill back after', () => {
+  const f = fixture();
+  const claude = f.State.tasks.find((t) => t.id === 'integration_claude');
+  const claudeBefore = claude.state;
+  const copilot = () => f.State.tasks.find((t) => t.id === 'agent_copilot');
+  const ask = (id) => f.listener({
+    coucou_agent: 'copilot', hook_event_name: 'PermissionRequest', session_id: 'c', cwd: 'C:/work/site',
+    request_id: id, tool_name: 'bash', tool_input: { command: 'rm -rf dist' },
+  });
+  f.listener({ coucou_agent: 'copilot', hook_event_name: 'UserPromptSubmit', session_id: 'c', cwd: 'C:/work/site', prompt: 'p' });
+  ask('p1');
+  assert.deepEqual(f.acked, ['p1']);
+  assert.deepEqual(f.declined, []);
+  assert.equal(f.State.view, 'approval');
+  assert.equal(f.State.pendingApproval.pillId, 'agent_copilot');
+  assert.match(f.State.pendingApproval.command, /rm -rf dist/);
+  assert.equal(copilot().state, 'approval');
+  assert.equal(f.State.isPinned, true);
+  f.hooks.approvalAnswered();
+  assert.equal(f.State.pendingApproval, null);
+  assert.equal(copilot().state, 'working');
+  // The turn ending before a click releases the request with Copilot's note.
+  ask('p2');
+  f.listener({ coucou_agent: 'copilot', hook_event_name: 'Stop', session_id: 'c' });
+  assert.deepEqual(f.declined, ['p2']);
+  assert.equal(f.State.pendingApproval, null);
+  assert.equal(f.State.noteMessage, 'Handled in Copilot CLI.');
+  assert.equal(claude.state, claudeBefore, 'Claude Code is never touched');
+});
+
+test('a Muse Code request gets the card, and its note when Muse stops waiting', () => {
+  const f = fixture();
+  f.listener({ coucou_agent: 'muse', hook_event_name: 'UserPromptSubmit', session_id: 'm', cwd: '/w', prompt: 'p' });
+  f.listener({
+    coucou_agent: 'muse', hook_event_name: 'PermissionRequest', session_id: 'm', cwd: '/w',
+    request_id: 'm1', tool_name: 'Bash', tool_input: { command: 'make' },
+  });
+  assert.deepEqual(f.acked, ['m1']);
+  assert.equal(f.State.pendingApproval.pillId, 'agent_muse');
+  f.listeners['approval-gone']({ requestId: 'm1' });
+  assert.equal(f.State.pendingApproval, null);
+  assert.equal(f.State.noteMessage, 'Handled in Muse Code.');
+  assert.equal(f.State.tasks.find((t) => t.id === 'agent_muse').state, 'working');
 });

@@ -5,6 +5,7 @@ mod claude_cli;
 mod codex_cli;
 mod codex_hooks;
 mod codex_review;
+mod copilot_hooks;
 mod files;
 mod hooks;
 mod integrations;
@@ -413,6 +414,24 @@ fn codex_hooks_apply(app: AppHandle, install: bool, fingerprint: String) -> Resu
     Ok(backup)
 }
 
+#[tauri::command]
+fn copilot_hooks_status() -> CodexHookStatus {
+    copilot_hooks::status()
+}
+
+/// Diff to show before anything is written to ~/.copilot/hooks/coucou.json.
+#[tauri::command]
+fn copilot_hooks_preview(install: bool) -> Result<HookPreview, String> {
+    copilot_hooks::preview(install)
+}
+
+/// Writes (or removes) ~/.copilot/hooks/coucou.json — only after an explicit
+/// click, and only when the file still matches the preview the user looked at.
+#[tauri::command]
+fn copilot_hooks_apply(install: bool, fingerprint: String) -> Result<String, String> {
+    copilot_hooks::write(install, &fingerprint)
+}
+
 /// Copies a dropped file into the inbox and reports its name back.
 #[tauri::command]
 fn ingest_file(path: String) -> Result<DroppedFile, String> {
@@ -600,6 +619,9 @@ pub fn run() {
             codex_hooks_status,
             codex_hooks_preview,
             codex_hooks_apply,
+            copilot_hooks_status,
+            copilot_hooks_preview,
+            copilot_hooks_apply,
             ingest_file,
             secret_present,
             secret_set,

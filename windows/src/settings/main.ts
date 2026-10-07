@@ -4,7 +4,8 @@
 
 import "./settings.css";
 import {
-  Bridge, chatFailure, onEvent, type CodexHookStatus, type HookStatus, type PlanRelayStatus, type SettingsSection,
+  Bridge, chatFailure, onEvent, type CodexHookStatus, type HookPreview, type HookStatus, type PlanRelayStatus,
+  type SettingsSection,
 } from "../core/bridge";
 import { DEFAULT_SETTINGS, type ChatProvider, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
@@ -282,25 +283,74 @@ function planSection(initial: PlanRelayStatus): HTMLElement {
   return section;
 }
 
-// ── Codex section ─────────────────────────────────────────────────────────────
+// ── Agent hook sections: Codex, Copilot CLI ───────────────────────────────────
 
 const EVENT_LABELS = { missing: "Missing", outdated: "Needs repair" } as const;
 
-function codexSection(initial: CodexHookStatus): HTMLElement {
+interface AgentHooksConfig {
+  /** The section's element id, the target of "Settings…" links. */
+  id: string;
+  name: string;
+  /** The label for the file's path. */
+  file: string;
+  status: () => Promise<CodexHookStatus | null>;
+  preview: (install: boolean) => Promise<HookPreview>;
+  /** Returns the backup path, or "" when there was nothing to back up. */
+  apply: (install: boolean, fingerprint: string) => Promise<string>;
+  installedHint: string;
+  missingHint: string;
+  installPreview: string;
+  removePreview: string;
+  installedNote: string;
+  removedNote: string;
+}
+
+const CODEX_HOOKS: AgentHooksConfig = {
+  id: "codex-hooks",
+  name: "Codex",
+  file: "hooks.json",
+  status: () => Bridge.codexHooksStatus(),
+  preview: (install) => Bridge.codexHooksPreview(install),
+  apply: (install, fingerprint) => Bridge.codexHooksApply(install, fingerprint),
+  installedHint: "Coucou is hooked into your Codex sessions: prompts, tool calls and finished turns show up on the Codex pill, and Codex's permission requests get Allow and Deny in the island.",
+  missingHint: "Install the hooks to see your Codex sessions on the Codex pill and answer Codex's permission requests from the island.",
+  installPreview: "This is exactly what will change in your hooks.json. Your own hooks and settings are left untouched.",
+  removePreview: "This removes Coucou's entries only. Your own hooks are left untouched.",
+  installedNote: "Codex asks you to review new or changed hooks: open Codex, run /hooks and trust them, then start a new session.",
+  removedNote: "Coucou's Codex hooks are removed.",
+};
+
+// Copilot CLI reads every file in its hooks folder; Coucou's are in coucou.json.
+const COPILOT_HOOKS: AgentHooksConfig = {
+  id: "copilot-hooks",
+  name: "Copilot CLI",
+  file: "coucou.json",
+  status: () => Bridge.copilotHooksStatus(),
+  preview: (install) => Bridge.copilotHooksPreview(install),
+  apply: (install, fingerprint) => Bridge.copilotHooksApply(install, fingerprint),
+  installedHint: "Coucou is hooked into your GitHub Copilot CLI sessions: prompts, tool calls and finished turns show up on a Copilot CLI pill, and Copilot's permission requests get Allow and Deny in the island.",
+  missingHint: "Install the hooks to see your GitHub Copilot CLI sessions on a Copilot CLI pill and answer Copilot's permission requests from the island.",
+  installPreview: "This is exactly what will be written to coucou.json, Coucou's own file in Copilot's hooks folder. Your other hook files are left untouched.",
+  removePreview: "This removes Coucou's entries only. When nothing else is left in coucou.json, the file is deleted. Your other hook files are left untouched.",
+  installedNote: "Start a new Copilot CLI session to use them.",
+  removedNote: "Coucou's Copilot CLI hooks are removed.",
+};
+
+function agentHooksSection(cfg: AgentHooksConfig, initial: CodexHookStatus): HTMLElement {
   let status = initial;
   const head = h("h2", {});
   const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
-  const section = h("section", { id: "codex-hooks" }, head, body);
+  const section = h("section", { id: cfg.id }, head, body);
 
   const rebuild = async () => {
-    status = (await Bridge.codexHooksStatus()) ?? status;
+    status = (await cfg.status()) ?? status;
     clear(body);
     draw();
   };
 
   function draw() {
     clear(head);
-    head.append(statusDot(status.installed), h("span", { text: "Codex" }));
+    head.append(statusDot(status.installed), h("span", { text: cfg.name }));
     const problems = (Object.keys(EVENT_LABELS) as (keyof typeof EVENT_LABELS)[])
       .map((state) => [state, status.events.filter((e) => e.state === state).map((e) => e.event)] as const)
       .filter(([, events]) => events.length > 0)
@@ -308,12 +358,10 @@ function codexSection(initial: CodexHookStatus): HTMLElement {
     body.append(
       h("div", {
         class: "hint",
-        text: status.installed
-          ? "Coucou is hooked into your Codex sessions: prompts, tool calls and finished turns show up on the Codex pill, and Codex's permission requests get Allow and Deny in the island."
-          : "Install the hooks to see your Codex sessions on the Codex pill and answer Codex's permission requests from the island.",
+        text: status.installed ? cfg.installedHint : cfg.missingHint,
       }),
       h("div", { class: "row" },
-        h("label", { text: "hooks.json" }),
+        h("label", { text: cfg.file }),
         h("span", { class: "path", text: status.path }),
       ),
       h("div", { class: "row" },
@@ -323,7 +371,7 @@ function codexSection(initial: CodexHookStatus): HTMLElement {
       ),
       h("div", {
         class: "hint",
-        text: `${status.events.filter((e) => e.state === "ok").length} of ${status.events.length} events registered. ${lastEventText("Codex", status.lastEvent)}`,
+        text: `${status.events.filter((e) => e.state === "ok").length} of ${status.events.length} events registered. ${lastEventText(cfg.name, status.lastEvent)}`,
       }),
     );
     if (problems.length) body.append(h("div", { class: "notice warn", text: problems.join(" · ") }));
@@ -350,7 +398,7 @@ function codexSection(initial: CodexHookStatus): HTMLElement {
   async function showPreview(install: boolean) {
     let preview;
     try {
-      preview = await Bridge.codexHooksPreview(install);
+      preview = await cfg.preview(install);
     } catch (err) {
       clear(body);
       body.append(
@@ -370,9 +418,7 @@ function codexSection(initial: CodexHookStatus): HTMLElement {
     body.append(
       h("div", {
         class: "hint",
-        text: install
-          ? "This is exactly what will change in your hooks.json. Your own hooks and settings are left untouched."
-          : "This removes Coucou's entries only. Your own hooks are left untouched.",
+        text: install ? cfg.installPreview : cfg.removePreview,
       }),
       renderDiff(preview.diff),
       h("div", { class: "row" }, h("span", { class: "path", text: `Backup → ${preview.backup}` })),
@@ -384,14 +430,12 @@ function codexSection(initial: CodexHookStatus): HTMLElement {
     confirm.addEventListener("click", async () => {
       confirm.disabled = true;
       try {
-        const backup = await Bridge.codexHooksApply(install, preview.fingerprint);
+        const backup = await cfg.apply(install, preview.fingerprint);
         const saved = backup ? `Previous file saved as ${backup}. ` : "";
         clear(body);
         body.append(h("div", {
           class: "notice ok",
-          text: install
-            ? `Done. ${saved}Codex asks you to review new or changed hooks: open Codex, run /hooks and trust them, then start a new session.`
-            : `Done. ${saved}Coucou's Codex hooks are removed.`,
+          text: `Done. ${saved}${install ? cfg.installedNote : cfg.removedNote}`,
         }), h("div", { class: "row" }, h("button", { text: "Back", onclick: () => void rebuild() })));
       } catch (err) {
         confirm.disabled = false;
@@ -869,10 +913,12 @@ async function main() {
   const present: Record<string, boolean> = {};
   for (const k of keys) present[k] = await Bridge.secretPresent(k).catch(() => false);
 
-  const codex = (await Bridge.codexHooksStatus()) ?? {
+  const noHooks: CodexHookStatus = {
     path: "", exists: false, problem: null, hookPath: "", hookReady: false,
     events: [], installed: false, anyInstalled: false, lastEvent: null,
   };
+  const codex = (await Bridge.codexHooksStatus()) ?? noHooks;
+  const copilot = (await Bridge.copilotHooksStatus()) ?? noHooks;
 
   const plan = (await Bridge.planRelayStatus()) ?? {
     installed: false, settingsPath: "", hookReady: false, kept: null, other: null,
@@ -880,13 +926,14 @@ async function main() {
 
   const planEl = planSection(plan);
   const chats = [chatSection(CLAUDE_CHAT), chatSection(CODEX_CHAT)];
-  const codexHooks = codexSection(codex);
+  const codexHooks = agentHooksSection(CODEX_HOOKS, codex);
   clear(root);
   root.append(
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
     claudeSection(status),
     planEl,
     codexHooks,
+    agentHooksSection(COPILOT_HOOKS, copilot),
     ...chats.map((chat) => chat.el),
     integrationsSection(present),
     generalSection(),

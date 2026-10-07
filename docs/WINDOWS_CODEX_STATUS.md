@@ -1,6 +1,6 @@
 # Windows Codex integration: progress and next phases
 
-Last updated: 7 October 2026 (section 18: the GitHub pulse card). On 5 October
+Last updated: 7 October 2026 (section 19: Copilot CLI and Muse Code). On 5 October
 **`windows-codex` became the latest working version** — everything from `windows-codex-claude` and `windows-plan-usage`
 (sections 7–14), with upstream Coucou 0.1.8 merged. The upstream review is in
 [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
@@ -810,6 +810,69 @@ focus moved from the GitHub card to Codex or Claude Code with no hook event
 logged; it did not recur in the traced runs or a 25 s watch with no input, and
 the user was working at the time, so a click on the island is the likely cause,
 but it is unconfirmed.
+
+### 19. GitHub Copilot CLI and Muse Code (`windows-codex`, upstream #263)
+
+Upstream added Copilot CLI and Muse Code (with OpenCode and Amp, whose plugin
+installers are macOS-only). Its Windows README already listed the two, but
+nothing on Windows handled them: the relay passed Copilot's camelCase events
+through unchanged, and the island declined every approval that was not Claude
+Code's or Codex's.
+
+- The relay ([main.rs](../windows/hook/src/main.rs)) maps other agents' event
+  names to Claude Code's as the macOS relay does (Copilot's camelCase, Muse's
+  snake_case, Gemini CLI's and Antigravity's), and their fields: Copilot's
+  `toolName`, `toolArgs` (an object, or a JSON string), `sessionId` and
+  `workdir`, Gemini's `toolCall`. Copilot's `toolResult` is dropped, like
+  Claude Code's `tool_response`.
+- Copilot CLI, Muse Code, Gemini CLI and Antigravity read a JSON object from
+  every hook, so they always get one: `{}` when there is no decision (Copilot
+  treats anything else as a failed hook). An island decision reaches Copilot
+  as `{"behavior":…,"permissionDecision":…}`: Copilot's current documentation
+  reads `behavior` for `permissionRequest`, and Coucou on macOS sends
+  `permissionDecision`, so both are sent. Muse gets `permissionDecision`, as on
+  macOS. Claude Code and Codex are unchanged.
+- The island: a **Copilot CLI** pill (#818CF8) and a **Muse Code** pill
+  (#38BDF8), labelled "Agent" as in macOS's pill catalog. Their permission
+  requests get the Allow / Deny card, with "Handled in Copilot CLI." or
+  "Handled in Muse Code." when the agent moves on first. Other agents still
+  go back to their own terminal.
+- **Settings → Copilot CLI** ([copilot_hooks.rs](../windows/src-tauri/src/copilot_hooks.rs))
+  installs `~/.copilot/hooks/coucou.json` (or under `$COPILOT_HOME`) with the
+  Codex section's rules: the exact diff, a dated backup, a write only on
+  click, foreign entries untouched, no write if the file changed since the
+  preview. On Windows each entry is a `powershell` command (`& "…\coucou-hook.exe"
+  --agent copilot <event>`): Copilot runs `powershell` entries on Windows and
+  `bash` ones elsewhere, so upstream's bash-only entries would never run here.
+  Removal takes Coucou's entries out and deletes the file when only its
+  version is left. Backups do not end in `.json`, so Copilot never loads one
+  as a second set of hooks. The Codex and Copilot sections share one
+  implementation; Codex's texts are unchanged.
+- Muse Code runs on macOS and Linux only (on Windows it needs WSL2), so there
+  is no installer on Windows; the relay and the island handle `--agent muse`.
+  The README's Windows path for Muse's settings was wrong and is replaced.
+
+Verified: `npm test` (73, three new in `tests/hooks.test.mjs`), `npx tsc
+--noEmit`, `cargo test -p coucou --lib --locked` (64, five new in
+`copilot_hooks.rs`), `cargo test -p coucou-hook --locked` (16, seven new: the
+argument parsing, the event and field mapping, the decision formats, `{}` for
+JSON agents, Claude Code payloads untouched), release builds of both. Live,
+with simulated payloads in Copilot's camelCase format through the installed
+relay: `userPromptSubmitted` and `preToolUse` made a Copilot CLI pill with the
+prompt and "bash · npm test" (the relay printed `{}` and exited 0);
+`permissionRequest` showed "Copilot CLI needs permission · bash · git push fork
+windows-codex", and Allow made the relay print
+`{"behavior":"allow","permissionDecision":"allow"}`; a second request while
+the first was waiting went straight back with `{}`; `agentStop` showed
+"Copilot CLI finished" and the pill went away. The user installed the hooks
+from Settings during the test: the app reports all eight events registered,
+and the file's `sessionStart` command, run as written through `powershell
+-Command` with the JSON piped in, reached Coucou and returned `{}` with exit
+code 0. Not verified: a real Copilot CLI session (the CLI is not installed on
+this machine; VS Code's Copilot Chat ships only a launcher that offers to
+install it), whether Copilot runs `powershell` entries with `powershell.exe`
+or `pwsh` (`pwsh` is not installed here), a live Deny (covered by the relay
+and island tests), and Muse Code anywhere.
 
 ## Where the implementation lives
 

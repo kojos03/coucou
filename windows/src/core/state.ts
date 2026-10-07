@@ -29,13 +29,18 @@ export function agentLabel(task: AgentTask | null): string {
   return task.name;
 }
 
+/** Agents in macOS's pill catalog, labelled "Agent" there. */
+const CATALOG_AGENTS = ["agent_copilot", "agent_muse"];
+
 /**
  * The grey label beside the name in the ticker and on cards. Claude Code's
  * name is its project, so the label names the agent; Codex is always called
- * Codex and reads "Codex · Integration", like its idle card.
+ * Codex and reads "Codex · Integration", like its idle card; Copilot CLI and
+ * Muse Code read "· Agent", as on macOS.
  */
 export function sessionLabel(task: AgentTask | null): string {
   if (task?.id === "agent_codex") return "Integration";
+  if (task && CATALOG_AGENTS.includes(task.id)) return "Agent";
   return agentLabel(task);
 }
 

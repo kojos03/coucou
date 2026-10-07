@@ -144,6 +144,24 @@ away and Codex asks you itself. Chats whose approvals go to Codex's auto-review
 ask you. With no chat running, the pill shows whether the
 hooks are installed and **Open Codex** when the Codex app is installed.
 
+## GitHub Copilot CLI
+
+Open **Settings… → Copilot CLI**. **Install hooks…** writes Coucou's own file,
+`%USERPROFILE%\.copilot\hooks\coucou.json` (Copilot reads every file in that
+folder), after showing the exact diff and the dated backup; **Remove hooks…**
+takes Coucou's entries out and deletes the file when nothing else is left in it.
+On Windows the entries are PowerShell commands, as Copilot runs them there.
+
+A Copilot session then gets a **Copilot CLI** pill (indigo) with its prompt and
+each step, and goes away a few seconds after the turn ends, like other agents'
+pills. When Copilot asks for permission, the island shows **Deny** and **Allow**;
+if nobody clicks within 110 seconds, Copilot asks you itself.
+
+Muse Code (Meta) runs on macOS and Linux only; on Windows it needs WSL2, which
+Coucou does not reach. The relay and the island understand its events
+(`--agent muse`: a **Muse Code** pill, with Allow and Deny), but there is no
+installer here.
+
 ## Chat and keys
 
 Coucou has two Mochis, shown as the **Claude Code** and **Codex** pills. The
@@ -260,8 +278,8 @@ The relay (`coucou-hook.exe`) works with any tool that can run a command on hook
 | Antigravity | `--agent antigravity` positional arg | `%USERPROFILE%\.config\antigravity\hooks.json` |
 | Cursor | hooks installed automatically | `%USERPROFILE%\.claude\settings.json` |
 | Codex | `--agent codex` positional arg | `%USERPROFILE%\.codex\hooks.json` |
-| Copilot CLI | `--agent copilot` positional arg + camelCase events | `%USERPROFILE%\.copilot\hooks\coucou.json` |
-| Muse Code | `--agent muse` positional arg | `%USERPROFILE%\.config\muse\settings.json` |
+| Copilot CLI | **Settings → Copilot CLI → Install hooks** (`--agent copilot`, camelCase events) | `%USERPROFILE%\.copilot\hooks\coucou.json` |
+| Muse Code | macOS and Linux only (Windows needs WSL2); `--agent muse` by hand, no installer here | `~/.config/muse/settings.json` |
 | Any other | `--agent <name>` positional arg | your tool's hook config |
 
 OpenCode and Amp are not yet supported on Windows or Linux. Their integration uses a plugin that calls `/bin/sh` with macOS-specific paths; the plugin installer lives in the Mac app only.

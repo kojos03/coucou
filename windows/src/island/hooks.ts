@@ -46,6 +46,20 @@ function validateAgent(raw: string | undefined): string | null {
 
 const FALLBACK_COLORS = ["#22C55E", "#EAB308", "#60A5FA", "#E879F9"];
 
+/** Agents with a name and colour of their own, as in macOS's PillCatalog. */
+const KNOWN_AGENTS: Record<string, { name: string; color: string }> = {
+  copilot: { name: "Copilot CLI", color: "#818CF8" },
+  muse: { name: "Muse Code", color: "#38BDF8" },
+};
+
+/** External agents whose permission requests get the Allow / Deny card; the
+ * others are handed straight back to their terminal. */
+const APPROVING: Record<string, string> = {
+  [CODEX_ID]: "Codex",
+  agent_copilot: "Copilot CLI",
+  agent_muse: "Muse Code",
+};
+
 function agentColor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) {
@@ -262,7 +276,7 @@ function refreshCodex() {
   State.notify();
 }
 
-const agentOf = (pillId: string) => (pillId === CODEX_ID ? "Codex" : "Claude Code");
+const agentOf = (pillId: string) => APPROVING[pillId] ?? "Claude Code";
 
 /**
  * The approval card is done with, answered or not: its pill goes back to work.
@@ -280,8 +294,8 @@ export function approvalAnswered() {
   if (pending.pillId === CODEX_ID) {
     refreshCodex();
   } else {
-    State.updateTask(CLAUDE_ID, "working");
-    State.setPillBadge(CLAUDE_ID, null);
+    State.updateTask(pending.pillId, "working");
+    State.setPillBadge(pending.pillId, null);
   }
 }
 
@@ -380,13 +394,14 @@ function handleHook(island: Island, payload: HookPayload) {
   /** Ensure the agent pill exists (no-op for Claude Code). */
 const ensurePill = () => {
   if (isExternalAgent) {
+    const known = KNOWN_AGENTS[validAgent!];
     const displayName =
-      validAgent!.charAt(0).toUpperCase() + validAgent!.slice(1);
+      known?.name ?? validAgent!.charAt(0).toUpperCase() + validAgent!.slice(1);
 
     State.upsertExternalAgent(
       agentId,
       displayName,
-      agentColor(validAgent!),
+      known?.color ?? agentColor(validAgent!),
     );
     // Terminal and VS Code actions open the focused pill's folder. Codex
     // replaces it with the selected session's folder below.
@@ -442,6 +457,8 @@ const ensurePill = () => {
   if (agentId === CLAUDE_ID) {
     resolveApprovalFor(island, CLAUDE_ID, name, payload.session_id);
     watchClaude();
+  } else if (APPROVING[agentId]) {
+    resolveApprovalFor(island, agentId, name, payload.session_id);
   }
 
   switch (name) {
@@ -548,10 +565,10 @@ const ensurePill = () => {
       break;
 
     case "PermissionRequest": {
-      // Claude Code and Codex get the card. Other external agents do not —
-      // showing one would look like a Claude Code or Codex request. Decline
-      // immediately so the agent asks in its own terminal.
-      if (isExternalAgent && agentId !== CODEX_ID) {
+      // Claude Code, Codex, Copilot CLI and Muse Code get the card. Other
+      // external agents do not — showing one would look like another agent's
+      // request. Decline immediately so the agent asks in its own terminal.
+      if (isExternalAgent && !APPROVING[agentId]) {
         if (payload.request_id) void Bridge.approvalDecline(payload.request_id);
         break;
       }
@@ -565,6 +582,7 @@ const ensurePill = () => {
         break;
       }
       if (agentId === CLAUDE_ID) upsert(projectName, cwd);
+      else if (agentId !== CODEX_ID) ensurePill();
       if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";
       const input = payload.tool_input ?? {};
@@ -579,7 +597,7 @@ const ensurePill = () => {
       // line is synchronous, so the card really is up by the time it lands.
       if (requestId) void Bridge.approvalAck(requestId);
       if (agentId === CODEX_ID) refreshCodex();
-      else State.updateTask(CLAUDE_ID, "approval");
+      else State.updateTask(agentId, "approval");
       State.isPinned = true;
       Sound.play("approval");
       if (focused) {
