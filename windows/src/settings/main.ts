@@ -894,6 +894,49 @@ function generalSection(): HTMLElement {
   );
 }
 
+// ── Weekly recap ──────────────────────────────────────────────────────────────
+
+function recapSection(): HTMLElement {
+  const hide = toggle(settings.recapHideProjects, (v) => { settings.recapHideProjects = v; void save(); });
+  (hide as HTMLButtonElement).disabled = !settings.recapEnabled;
+  const keep = toggle(settings.recapEnabled, (v) => {
+    settings.recapEnabled = v;
+    (hide as HTMLButtonElement).disabled = !v;
+    void save();
+  });
+  const note = h("span", { class: "hint" });
+  const clearButton = h("button", { text: "Clear history" }) as HTMLButtonElement;
+  clearButton.addEventListener("click", async () => {
+    clearButton.disabled = true;
+    try {
+      await Bridge.recapClear();
+      note.textContent = "History cleared.";
+    } catch (err) {
+      note.textContent = `Could not clear it: ${chatFailure(err).message}`;
+    } finally {
+      clearButton.disabled = false;
+    }
+  });
+  return h(
+    "section",
+    { id: "weekly-recap" },
+    h("h2", {}, h("span", { text: "Weekly recap" })),
+    h("div", { class: "row" },
+      h("label", { text: "Keep a history of my coding sessions" }),
+      keep,
+    ),
+    h("div", {
+      class: "hint",
+      text: "Stored locally on your computer. Nothing leaves your computer. Retained for 12 weeks. On Monday morning the island shows last week; the tray menu's Weekly recap opens it any time.",
+    }),
+    h("div", { class: "row" },
+      h("label", { text: "Hide project names in shared images" }),
+      hide,
+    ),
+    h("div", { class: "row" }, clearButton, note),
+  );
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -937,6 +980,7 @@ async function main() {
     ...chats.map((chat) => chat.el),
     integrationsSection(present),
     generalSection(),
+    recapSection(),
     h("div", {
       class: "hint",
       text: "No telemetry. Network requests only go to the services you configure yourself.",

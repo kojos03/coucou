@@ -16,6 +16,8 @@ import { nowSeconds } from "../core/plan";
 import { formatSpeed } from "../core/net";
 import { Bridge } from "../core/bridge";
 import { OUTFITS, drawOutfitIcon, outfitName, parseOutfit, seasonalOutfit, type Outfit } from "../mochi/outfits";
+import { Recap, formatDuration, weekRangeLabel, type WeeklySummary } from "../core/recap";
+import { shareRecapImage } from "./recap-image";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -692,6 +694,66 @@ function buildPlaceholder(title: string, sub: string): ViewHost {
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
+// ── Weekly recap (WeeklyRecapCardView) ─────────────────────────────────────────
+
+/** The card's chips: time, sessions and files, then what is non-zero. */
+export function recapChips(s: WeeklySummary): [string, string][] {
+  const chips: [string, string][] = [
+    [formatDuration(s.totalMinutes), "coding"],
+    [String(s.sessionCount), s.sessionCount === 1 ? "session" : "sessions"],
+    [String(s.filesChanged), s.filesChanged === 1 ? "file" : "files"],
+  ];
+  if (s.commandsRun > 0) chips.push([String(s.commandsRun), "commands"]);
+  if (s.linesAdded + s.linesRemoved > 0) chips.push([`+${s.linesAdded} / -${s.linesRemoved}`, "lines"]);
+  if (s.questionsAnswered > 0) chips.push([String(s.questionsAnswered), s.questionsAnswered === 1 ? "question" : "questions"]);
+  return chips;
+}
+
+function buildRecap(actions: ViewActions): ViewHost {
+  const body = stack(116, 16);
+  body.className = "stack recap";
+  const el = h("div", { class: "view" }, card("indigo", body));
+  let key: string | null = null;
+  return {
+    el,
+    sync() {
+      const s = Recap.weeklySummary();
+      const k = JSON.stringify(s);
+      if (k === key) return;
+      key = k;
+      clear(body);
+      const ok = btn("OK", "secondary", () => actions.collapse());
+      if (!s) {
+        body.append(h("div", { class: "title", text: "No activity last week" }), h("div", { class: "actions" }, ok));
+        return;
+      }
+      const note = h("span", { class: "recap-note" });
+      let busy = false;
+      const share = btn("Share image", "primary", () => {
+        if (busy) return;
+        busy = true;
+        note.textContent = "Drawing…";
+        shareRecapImage(s, State.settings.recapHideProjects).then(
+          (path) => {
+            note.textContent = /[\\/]Pictures[\\/]Coucou[\\/]/.test(path) ? "Saved in Pictures › Coucou" : "Saved";
+            void Bridge.log(`recap image saved: ${path}`);
+          },
+          (err) => {
+            note.textContent = "Couldn't save the image";
+            void Bridge.log(`recap image failed: ${err instanceof Error ? err.message : String(err)}`);
+          },
+        ).finally(() => { busy = false; });
+      });
+      body.append(
+        h("div", { class: "recap-head" }, h("b", { text: "Weekly recap" }), h("span", { text: weekRangeLabel(s) })),
+        h("div", { class: "recap-chips" }, ...recapChips(s).map(([value, label]) =>
+          h("div", { class: "recap-chip" }, h("b", { text: value }), h("span", { text: label })))),
+        h("div", { class: "actions" }, share, ok, note),
+      );
+    },
+  };
+}
+
 export function buildViews(
   actions: ViewActions,
   onChatHeightChange: () => void,
@@ -707,6 +769,7 @@ export function buildViews(
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
   map.set("wardrobe", buildWardrobe(actions));
+  map.set("recap", buildRecap(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());

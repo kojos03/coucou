@@ -110,6 +110,13 @@ export const Bridge = {
   codexHooksApply: (install: boolean, fingerprint: string) =>
     callOrThrow<string>("codex_hooks_apply", { install, fingerprint }),
 
+  // ── Weekly recap (%LOCALAPPDATA%\Coucou\recap.json) ─────────────────────────
+  recapLoad: () => call<string | null>("recap_load"),
+  recapSave: (history: string) => call<void>("recap_save", { history }),
+  recapClear: () => callOrThrow<void>("recap_clear"),
+  /** Saves the share image and opens it; returns the file's path. */
+  recapSaveImage: (png: number[], name: string) => callOrThrow<string>("recap_save_image", { png, name }),
+
   // ── Copilot CLI hooks (~/.copilot/hooks/coucou.json) ──────────────────────
   copilotHooksStatus: () => call<CodexHookStatus>("copilot_hooks_status"),
   copilotHooksPreview: (install: boolean) => callOrThrow<HookPreview>("copilot_hooks_preview", { install }),

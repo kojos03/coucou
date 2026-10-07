@@ -8,6 +8,8 @@ import { Sound } from "../core/sound";
 import { State, type AgentTask } from "../core/state";
 import type { Island } from "./island";
 import { CodexSessions, type CodexSession } from "./codex-sessions";
+import { Recap } from "../core/recap";
+import { checkMondayRecap } from "./recap";
 
 const CLAUDE_ID = "integration_claude";
 const CODEX_ID = "agent_codex";
@@ -35,6 +37,38 @@ export interface HookPayload {
   tool_input?: Record<string, unknown>;
   /** Optional agent tag: lowercase, digits and hyphens, ≤ 24 chars. */
   coucou_agent?: string;
+  /** Lines an Edit, MultiEdit or Write changed, counted by the relay. */
+  coucou_diff?: { path: string; added: number; removed: number };
+}
+
+/**
+ * Feeds the weekly recap (HookServer → RecapStore): a turn from the prompt to
+ * its Stop, with its commands and edited lines. Sessions without an id are
+ * told apart by pill and folder.
+ */
+function recordRecap(name: string, payload: HookPayload, pillId: string, project: string, cwd: string) {
+  const sid = payload.session_id && payload.session_id !== "unknown" ? payload.session_id : `${pillId}+${cwd}`;
+  switch (name) {
+    case "UserPromptSubmit":
+      Recap.userPromptSubmit(sid, pillId, project);
+      break;
+    case "PreToolUse":
+      Recap.preToolUse(sid, payload.tool_name ?? "");
+      break;
+    case "PostToolUse": {
+      const diff = payload.coucou_diff;
+      if (diff && typeof diff.path === "string") Recap.recordFileDiff(sid, diff.path, diff.added | 0, diff.removed | 0);
+      break;
+    }
+    case "Stop":
+    case "StopFailure":
+    case "Interrupt":
+      Recap.stop(sid);
+      break;
+    case "SessionEnd":
+      Recap.sessionEnd(sid);
+      break;
+  }
 }
 
 /** Same rule as HookServer.validateAgent on macOS. "claude" is reserved. */
@@ -360,6 +394,9 @@ function handleHook(island: Island, payload: HookPayload) {
   const agentId = validAgent ? `agent_${validAgent}` : CLAUDE_ID;
   const isExternalAgent = validAgent !== null;
   const focused = State.focusId === agentId;
+
+  recordRecap(name, payload, agentId, projectName, cwd);
+  if (name === "SessionStart" || name === "UserPromptSubmit") checkMondayRecap(island);
 
   /** Alerts force the island open; work events only reveal the compact island. */
   const surface = (view: Parameters<Island["alert"]>[0], isAlert: boolean) => {

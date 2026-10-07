@@ -26,7 +26,7 @@ function fixture() {
       require: (name) => {
         if (name.endsWith('/bridge')) return {
           onEvent: (event, fn) => { listeners[event] = fn; },
-          Bridge: { approvalDecline: (id) => declined.push(id), approvalAck: (id) => acked.push(id), log: (line) => logs.push(line) },
+          Bridge: { approvalDecline: (id) => declined.push(id), approvalAck: (id) => acked.push(id), log: (line) => logs.push(line), recapSave() {} },
         };
         if (name.endsWith('/sound')) return { Sound: { play: (sound) => sounds.push(sound) } };
         return load(resolve(dirname(file), `${name}.ts`));

@@ -1,6 +1,6 @@
 # Windows Codex integration: progress and next phases
 
-Last updated: 7 October 2026 (section 19: Copilot CLI and Muse Code). On 5 October
+Last updated: 7 October 2026 (section 20: the weekly recap). On 5 October
 **`windows-codex` became the latest working version** — everything from `windows-codex-claude` and `windows-plan-usage`
 (sections 7–14), with upstream Coucou 0.1.8 merged. The upstream review is in
 [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
@@ -873,6 +873,53 @@ this machine; VS Code's Copilot Chat ships only a launcher that offers to
 install it), whether Copilot runs `powershell` entries with `powershell.exe`
 or `pwsh` (`pwsh` is not installed here), a live Deny (covered by the relay
 and island tests), and Muse Code anywhere.
+
+### 20. Weekly recap (`windows-codex`, upstream #264)
+
+On Monday from 8 am the island shows last week by itself, once: time spent
+with your agents, sessions, files and lines changed, commands run, with
+**Share image** and **OK**. It checks at launch, every quarter of an hour
+(which also covers waking from sleep) and when an agent starts or is
+prompted, and never over a waiting approval. The tray menu's new **Weekly
+recap** opens it any time. **Settings → Weekly recap** keeps the history (on
+by default), hides project names in shared images, and clears the history.
+
+- [recap.ts](../windows/src/core/recap.ts) ports `RecapStore.swift`: a turn
+  runs from a prompt to its Stop (or StopFailure, Interrupt), per session;
+  commands are counted from macOS's three tools plus PowerShell and the
+  shells Codex and Copilot use; Allow and Deny clicks in the island are
+  counted; a turn silent for two hours is closed at its last event; parallel
+  turns count once in the time; 12 weeks are kept. The top agent and project
+  are by number of turns, as on macOS; a tie goes to the first seen. The
+  history is `%LOCALAPPDATA%\Coucou\recap.json`; an unreadable file is set
+  aside as `recap.corrupt-<time>`. Nothing leaves the computer.
+- Edited lines: macOS counts them in the app from the edit itself. On Windows
+  the island gets only the first 2,000 characters of each string, so the relay
+  counts them ([diff.rs](../windows/hook/src/diff.rs), DiffEngine's counting:
+  an LCS on lines with the same size guards and fallback) and passes
+  `coucou_diff` with the PostToolUse event.
+- The share image ([recap-image.ts](../windows/src/views/recap-image.ts)) is
+  `RecapShareImageView` drawn on a canvas at 1080×1920, Mochi included. It is
+  saved as `Pictures\Coucou\coucou-weekly-recap-<Monday>.png` and opened in the
+  default image viewer, where it can be copied or shared; macOS opens a panel
+  with Copy, Save and Share instead.
+- Questions answered stay at zero until Coucou answers Claude Code's
+  questions on Windows (a later item on the list).
+
+Verified: `npm test` (81, eight new in `tests/recap.test.mjs`: ISO weeks, a
+week's summary with a parallel turn, stale turns, pruning and the off switch,
+loading a damaged history, the Monday rule, recording from the real hook
+listener, the card, the image's content and order), `npx tsc --noEmit`,
+`cargo test -p coucou --lib --locked` (66, two new), `cargo test -p
+coucou-hook --locked` (21, five new), release builds. The image was drawn from
+the same code in headless Chromium and looked like the macOS one. In the
+running app: the tray's Weekly recap opened the card ("No activity last week",
+the history being new); a turn sent through the installed relay as a test agent
+was saved with 2 files, +3002 / −1 lines (all 3,000 lines of a Write whose text
+the relay cut) and 1 command; Settings → Weekly recap → Clear history removed
+it; the image command refused data that is not a PNG. Not verified: the
+Monday card on an actual Monday, and Share image end to end (it would have
+opened a viewer window on the user's screen).
 
 ## Where the implementation lives
 

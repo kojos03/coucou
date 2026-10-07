@@ -35,6 +35,16 @@ pub struct Settings {
     /// "auto" to follow the seasons.
     #[serde(default = "default_mochi_outfit")]
     pub mochi_outfit: String,
+    /// Keep the local history the weekly recap is made from.
+    #[serde(default = "default_true")]
+    pub recap_enabled: bool,
+    /// Leave project names out of the recap's share image.
+    #[serde(default)]
+    pub recap_hide_projects: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_model() -> String {
@@ -78,6 +88,8 @@ impl Default for Settings {
             openai_auth: default_openai_auth(),
             anthropic_auth: default_anthropic_auth(),
             mochi_outfit: default_mochi_outfit(),
+            recap_enabled: true,
+            recap_hide_projects: false,
         }
     }
 }

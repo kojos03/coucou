@@ -1656,6 +1656,64 @@ button.int-usage:hover .g b {
   background: transparent;
 }
 
+/* ── Weekly recap (WeeklyRecapCardView) ──────────────────────────────────────
+   Title and week, a row of stat chips, Share image and OK. */
+
+.recap-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.recap-head b {
+  font: 600 11px var(--font);
+  color: #818cf8;
+}
+
+.recap-head span {
+  margin-left: auto;
+  font: 400 10px var(--font);
+  color: #8e939c;
+  white-space: nowrap;
+}
+
+.recap-chips {
+  display: flex;
+  gap: 14px;
+  min-width: 0;
+}
+
+.recap-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.recap-chip b {
+  font: 700 17px var(--font);
+  color: #f1f2f4;
+  white-space: nowrap;
+}
+
+.recap-chip span {
+  font: 400 9px var(--font);
+  color: #8e939c;
+  white-space: nowrap;
+}
+
+.recap-note {
+  align-self: center;
+  font: 400 10px var(--font);
+  color: #8e939c;
+  white-space: nowrap;
+}
+
+.recap .title {
+  font: 600 14px var(--font);
+  color: #f1f2f4;
+}
+
 /* ── Wardrobe (WardrobeView.swift) ──────────────────────────────────────────
    Mochi stays on the left; a row of outfits. Hover tries one on, click keeps it. */
 

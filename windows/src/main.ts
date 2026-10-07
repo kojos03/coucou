@@ -6,9 +6,11 @@ import { reportError } from "./core/errors";
 import { Sound } from "./core/sound";
 import { MUSIC_ID, State, type NowPlaying, type Settings } from "./core/state";
 import type { PlanUsage } from "./core/plan";
+import { Recap } from "./core/recap";
 import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
+import { checkMondayRecap } from "./island/recap";
 
 async function main() {
   const root = document.getElementById("root");
@@ -53,6 +55,10 @@ async function main() {
         setPaused(!State.paused);
         if (State.paused) island.fsm.forceHidden();
         else island.reveal();
+        break;
+      case "recap":
+        setPaused(false);
+        island.alert("recap");
         break;
     }
   });
@@ -100,10 +106,21 @@ async function main() {
   await onEvent<NowPlaying | null>("music", applyMusic);
   State.music = (await Bridge.musicNow()) ?? null;
 
+  // The weekly recap's history, before the first hook event can add to it.
+  Recap.load(await Bridge.recapLoad());
+  await onEvent<null>("recap-cleared", () => {
+    Recap.clear();
+    State.notify();
+  });
+
   registerHookHandlers(island);
   registerIntegrationHandlers(island);
 
   island.launch();
+
+  // Monday's recap card: after the greeting, then every quarter of an hour.
+  window.setTimeout(() => checkMondayRecap(island), 12_000);
+  window.setInterval(() => checkMondayRecap(island), 15 * 60_000);
 
   // In a plain browser there is no wake strip behind the cursor: make the whole
   // page wake the island so the visuals can be checked with `npm run dev`.

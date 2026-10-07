@@ -18,6 +18,7 @@ mod netspeed;
 mod openai;
 mod pipe;
 mod plan_usage;
+mod recap;
 mod platform;
 mod secrets;
 mod settings;
@@ -432,6 +433,31 @@ fn copilot_hooks_apply(install: bool, fingerprint: String) -> Result<String, Str
     copilot_hooks::write(install, &fingerprint)
 }
 
+/// The weekly recap's saved history, if any (the island makes the summary).
+#[tauri::command]
+fn recap_load() -> Option<String> {
+    recap::load()
+}
+
+#[tauri::command]
+fn recap_save(history: String) -> Result<(), String> {
+    recap::save(&history)
+}
+
+/// Settings → Weekly recap → Clear history: the file, then the island's copy.
+#[tauri::command]
+fn recap_clear(app: AppHandle) -> Result<(), String> {
+    recap::clear()?;
+    let _ = app.emit_to(island::WINDOW_LABEL, "recap-cleared", ());
+    Ok(())
+}
+
+/// Saves the recap's share image and opens it; returns where it went.
+#[tauri::command]
+fn recap_save_image(png: Vec<u8>, name: String) -> Result<String, String> {
+    recap::save_image(&png, &name)
+}
+
 /// Copies a dropped file into the inbox and reports its name back.
 #[tauri::command]
 fn ingest_file(path: String) -> Result<DroppedFile, String> {
@@ -622,6 +648,10 @@ pub fn run() {
             copilot_hooks_status,
             copilot_hooks_preview,
             copilot_hooks_apply,
+            recap_load,
+            recap_save,
+            recap_clear,
+            recap_save_image,
             ingest_file,
             secret_present,
             secret_set,

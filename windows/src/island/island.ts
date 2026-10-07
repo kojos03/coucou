@@ -11,6 +11,7 @@ import {
   type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { dominantPct, planColor } from "../core/plan";
+import { Recap } from "../core/recap";
 import { Sound } from "../core/sound";
 import { MUSIC_ID, State, isWorkspace } from "../core/state";
 import { BotEngine, hexToRGB } from "../mochi/engine";
@@ -158,6 +159,7 @@ export class Island {
         if (!req) return;
         Sound.play(d === "deny" ? "blip" : "approve");
         void Bridge.approvalDecision(req.requestId, d);
+        Recap.recordDecision(req.pillId, d);
         approvalAnswered();
         this.fsm.pinned = false;
         this.setView(State.defaultView());

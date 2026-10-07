@@ -48,6 +48,7 @@ mod unix;
 #[cfg(target_os = "linux")]
 use unix::connect;
 
+mod diff;
 mod statusline;
 
 fn main() {
@@ -247,6 +248,14 @@ fn prepare(raw: &[u8], agent: &str, arg_event: &str) -> Option<(String, String)>
     let event = normalize_event(&raw_event).to_string();
     map.insert("hook_event_name".into(), serde_json::Value::String(event.clone()));
     normalize_tool_fields(map);
+
+    // Lines changed by an edit, counted while the whole edit is still here.
+    if event == "PostToolUse" {
+        let tool = map.get("tool_name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        if let Some(counts) = map.get("tool_input").and_then(|v| v.as_object()).and_then(|i| diff::of_tool(&tool, i)) {
+            map.insert("coucou_diff".into(), counts);
+        }
+    }
 
     drop_fields(map, codex && event == "PermissionRequest");
 
@@ -464,6 +473,23 @@ mod tests {
             assert_eq!(p[key], claude[key], "{key}");
         }
         assert!(p.get("coucou_agent").is_none());
+    }
+
+    #[test]
+    fn an_edit_carries_its_line_counts_even_when_its_text_is_cut() {
+        let big = "x\n".repeat(3000);
+        let (p, _) = prepared(json!({
+            "hook_event_name": "PostToolUse", "session_id": "s", "cwd": "C:/p", "tool_name": "Write",
+            "tool_input": { "file_path": "C:/p/big.txt", "content": big }
+        }), "", "");
+        assert_eq!(p["coucou_diff"], json!({ "path": "C:/p/big.txt", "added": 3000, "removed": 0 }));
+        assert!(p["tool_input"]["content"].as_str().unwrap().len() < 2100, "the text itself is still cut");
+        // Not on the way in.
+        let (p, _) = prepared(json!({
+            "hook_event_name": "PreToolUse", "session_id": "s", "cwd": "C:/p", "tool_name": "Write",
+            "tool_input": { "file_path": "C:/p/a.txt", "content": "a" }
+        }), "", "");
+        assert!(p.get("coucou_diff").is_none());
     }
 
     #[test]

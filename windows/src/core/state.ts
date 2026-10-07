@@ -147,6 +147,10 @@ export interface Settings {
   anthropicAuth: "claudeCode" | "apiKey";
   /** Mochi's outfit (an Outfit name); "auto" follows the seasons. */
   mochiOutfit: string;
+  /** Keep the local history the weekly recap is made from. */
+  recapEnabled: boolean;
+  /** Leave project names out of the recap's share image. */
+  recapHideProjects: boolean;
 }
 
 export const MUSIC_ID = "integration_music";
@@ -190,6 +194,8 @@ export const DEFAULT_SETTINGS: Settings = {
   openaiAuth: "codex",
   anthropicAuth: "claudeCode",
   mochiOutfit: "auto",
+  recapEnabled: true,
+  recapHideProjects: false,
 };
 
 type Listener = () => void;
