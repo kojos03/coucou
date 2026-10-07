@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { ChatProvider, NowPlaying, Settings } from "./state";
+import type { ChatProvider, GitHubActivity, GitHubPulse, NowPlaying, Settings } from "./state";
 import type { PlanUsage } from "./plan";
 
 export const IS_TAURI =
@@ -35,6 +35,10 @@ export const Bridge = {
   boot: () => call<BootInfo>("boot"),
 
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
+  /** The GitHub card's pulse and calendar so far. */
+  githubLatest: () => call<{ pulse: GitHubPulse | null; activity: GitHubActivity | null }>("github_latest"),
+  /** The GitHub card or one of its lists opened: fetch again if stale. */
+  githubRefresh: (kind: "pulse" | "activity") => call<void>("github_refresh", { kind }),
   /** What the Music pill's player is playing now. */
   musicNow: () => call<NowPlaying | null>("music_now"),
   /** Play/pause, next or previous on that player. */

@@ -1505,6 +1505,157 @@ button.int-usage:hover .g b {
   padding-top: 8px;
 }
 
+/* ── GitHub pulse (GitHubPulseCardView, GitHubDetailView) ─────────────────────
+   Three tappable stat rows; lists of 20px rows (3 visible, the rest scroll under a
+   fade); the 23-week contribution grid of 7px squares. */
+
+.gh-week-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  font: 400 11px var(--font);
+  color: #8e939c;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.gh-week {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.gh-week i,
+.gh-day {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+}
+
+.gh-stats {
+  gap: 4px;
+  padding-top: 6px;
+}
+
+.gh-stat {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: default;
+}
+
+.gh-stat:hover .int-stat-value {
+  color: var(--ink);
+}
+
+.gh-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 60px;
+  margin-top: 4px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.gh-list::-webkit-scrollbar {
+  display: none;
+}
+
+.gh-list.fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 80%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 80%, transparent 100%);
+}
+
+.gh-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 20px;
+  height: 20px;
+  min-width: 0;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: default;
+}
+
+.gh-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.gh-ref {
+  font: 400 10.5px var(--font);
+  color: #9398a1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Full width up to 60%; the title gives way first. */
+  flex: 0 0 auto;
+  max-width: 60%;
+}
+
+.gh-title {
+  font: 400 11px var(--font);
+  color: #c5c8cd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.gh-draft {
+  font: 400 9.5px var(--font);
+  color: var(--dim-3);
+  flex: 0 0 auto;
+}
+
+.gh-word {
+  font: 400 10px var(--font);
+  margin-left: auto;
+  padding-left: 4px;
+  flex: 0 0 auto;
+}
+
+.gh-empty {
+  font: 400 10.5px var(--font);
+  color: var(--dim-3);
+  padding-top: 8px;
+}
+
+.gh-activity-label {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  font: 400 11px var(--font);
+  color: #8e939c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  cursor: default;
+}
+
+.gh-grid {
+  display: flex;
+  gap: 1.5px;
+  padding-top: 5px;
+}
+
+.gh-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5px;
+}
+
+.gh-day.empty {
+  background: transparent;
+}
+
 /* ── Wardrobe (WardrobeView.swift) ──────────────────────────────────────────
    Mochi stays on the left; a row of outfits. Hover tries one on, click keeps it. */
 

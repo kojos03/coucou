@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --test tests/hooks.test.mjs tests/phase1.test.mjs tests/codex-views.test.mjs tests/plan-usage.test.mjs tests/wardrobe.test.mjs tests/music.test.mjs",
+    "test": "node --test tests/hooks.test.mjs tests/phase1.test.mjs tests/codex-views.test.mjs tests/plan-usage.test.mjs tests/wardrobe.test.mjs tests/music.test.mjs tests/github.test.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "icons": "node scripts/gen-icons.mjs",

@@ -287,6 +287,7 @@ function buildOverview(actions: ViewActions): ViewHost {
           // The usage line on the Claude Code and Codex cards.
           JSON.stringify(State.planUsage), JSON.stringify(State.codexUsage), Math.floor(nowSeconds() / 60),
           task.id === MUSIC_ID ? JSON.stringify(State.music) : "",
+          task.id === "integration_github" ? JSON.stringify([State.githubPulse, State.githubActivity]) : "",
         ].join("~");
         if (key !== cardKey) {
           cardKey = key;

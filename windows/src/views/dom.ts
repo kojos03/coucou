@@ -26,7 +26,9 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-export function svg(path: string, size = 14, opts: { fill?: string; stroke?: number } = {}): SVGSVGElement {
+export function svg(
+  path: string, size = 14, opts: { fill?: string; stroke?: number; evenOdd?: boolean } = {},
+): SVGSVGElement {
   const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   el.setAttribute("viewBox", "0 0 24 24");
   el.setAttribute("width", String(size));
@@ -42,6 +44,8 @@ export function svg(path: string, size = 14, opts: { fill?: string; stroke?: num
     p.setAttribute("stroke-linejoin", "round");
   } else {
     p.setAttribute("fill", opts.fill ?? "currentColor");
+    // Holes (an X in an octagon, a tick in a seal) are cut by the even-odd rule.
+    if (opts.evenOdd) p.setAttribute("fill-rule", "evenodd");
   }
   el.append(p);
   return el;

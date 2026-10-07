@@ -11,6 +11,7 @@ mod integrations;
 mod island;
 mod launch;
 mod log;
+mod github;
 mod music;
 mod netspeed;
 mod openai;
@@ -425,8 +426,13 @@ fn secret_present(key: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn secret_set(key: String, value: String) -> Result<(), String> {
-    secrets::set(&key, &value)
+fn secret_set(app: AppHandle, key: String, value: String) -> Result<(), String> {
+    secrets::set(&key, &value)?;
+    // A new GitHub token: the card starts over with it, at once.
+    if key == "github-token" {
+        github::token_changed(&app);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -445,7 +451,23 @@ fn open_n8n() {
 /// Refresh buttons in the integration cards.
 #[tauri::command]
 async fn refresh_integration(app: AppHandle, id: String) {
+    if id == "integration_github" {
+        github::refresh_now();
+    }
     integrations::poll_once(app, &id).await;
+}
+
+/// The GitHub card's pull requests, CI and contribution calendar so far.
+#[tauri::command]
+fn github_latest() -> serde_json::Value {
+    github::latest()
+}
+
+/// The GitHub card (or one of its lists) opened: "pulse" or "activity" is
+/// fetched again if stale.
+#[tauri::command]
+fn github_refresh(kind: String) {
+    github::refresh_if_stale(&kind);
 }
 
 /// Lets the island write to the same log as the Rust side.
@@ -561,6 +583,8 @@ pub fn run() {
             usage_refresh,
             music_now,
             music_control,
+            github_latest,
+            github_refresh,
             approval_decision,
             approval_ack,
             approval_decline,
@@ -612,6 +636,7 @@ pub fn run() {
             std::thread::spawn(|| plan_usage::refresh_codex(None, true));
             netspeed::start(handle.clone(), gate.clone());
             music::start(handle.clone());
+            github::start(handle.clone());
             pipe::start(handle.clone());
             integrations::start(handle.clone());
             Ok(())

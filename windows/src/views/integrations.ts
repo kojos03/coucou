@@ -6,7 +6,10 @@
 
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
-import { State, type AgentTask } from "../core/state";
+import {
+  State, type AgentTask, type CiState, type GitHubActivity, type GitHubDay, type GitHubPR,
+  type GitHubPulse, type GitHubRepoCI,
+} from "../core/state";
 import { Bridge } from "../core/bridge";
 import { refreshCodexHooks } from "../island/integrations";
 import { effectivePct, nowSeconds, planColor, resetLabel, type PlanUsage, type PlanWindow } from "../core/plan";
@@ -23,7 +26,7 @@ export function timeAgo(value: unknown): string {
 }
 
 function header(color: string, name: string, kind: string, extra?: Node): HTMLElement {
-  const row = h("div", { class: "int-head" }, dot(color, 7), h("b", { text: name }), h("span", { text: kind }));
+  const row = h("div", { class: "int-head" }, dot(color, 7), h("b", { text: name }), kind ? h("span", { text: kind }) : null);
   if (extra) row.append(extra);
   return row;
 }
@@ -343,6 +346,192 @@ function githubCard(): HTMLElement {
   );
 }
 
+// ── GitHub pulse (GitHubPulseCardView, GitHubDetailView) ───────────────────────
+
+export type GitHubSection = "myPRs" | "toReview" | "mainCI" | "activity";
+/** Which list the card's detail shows; the overview owns whether it is open. */
+let githubSection: GitHubSection = "myPRs";
+
+const CI_COLOR: Record<CiState, string> = {
+  failure: "#F4505E", pending: "#F5A524", success: "#22C55E", unknown: "#6B7079",
+};
+/** Contribution levels 0–4, GitHub's dark palette. */
+const CONTRIB = ["rgba(255,255,255,0.06)", "#0E4429", "#006D32", "#26A641", "#39D353"];
+const ACTIVITY_WEEKS = 23; // floor((202 + 1.5) / (7 + 1.5)), as on macOS
+
+export function worstCi(states: CiState[]): CiState {
+  for (const s of ["failure", "pending", "success"] as const) if (states.includes(s)) return s;
+  return "unknown";
+}
+
+const fmtCount = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+export function lastDays(a: GitHubActivity, n: number): GitHubDay[] {
+  return a.weeks.flat().slice(-n);
+}
+
+/** "Oct 7 · 3 contributions" */
+export function dayLabel(day: GitHubDay): string {
+  const [, m, d] = day.date.split("-").map(Number);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const when = m >= 1 && m <= 12 && d ? `${months[m - 1]} ${d}` : day.date;
+  const what = day.count === 0 ? "No contributions" : day.count === 1 ? "1 contribution" : `${day.count} contributions`;
+  return `${when} · ${what}`;
+}
+
+/** Only github.com links leave the island. */
+function openGitHub(url: string) {
+  try {
+    if (new URL(url).host === "github.com") void Bridge.openUrl(url);
+  } catch {
+    /* not a URL */
+  }
+}
+
+function statButton(icon: HTMLElement | SVGElement, color: string, label: string, value: string, onClick: () => void) {
+  return h(
+    "button",
+    { class: "int-stat gh-stat", onclick: onClick },
+    h("i", { class: "int-stat-icon", style: `color:${color}` }, icon),
+    h("span", { class: "int-stat-label", text: label }),
+    h("span", { class: "int-stat-value", text: value }),
+  );
+}
+
+/** My PRs, To review, Default branch CI; stars and the last week up top. */
+function githubPulseCard(pulse: GitHubPulse, open: (section: GitHubSection) => void): HTMLElement {
+  const d = get("integration_github");
+  const activity = State.githubActivity;
+  let extra: HTMLElement | undefined;
+  if (d.totalStars != null || activity) {
+    extra = h("button", { class: "gh-week-btn", title: "Activity", onclick: () => open("activity") });
+    if (d.totalStars != null) extra.append(h("span", { text: `★ ${fmtCount(Number(d.totalStars))}` }));
+    if (activity) {
+      extra.append(h("span", { class: "gh-week" },
+        ...lastDays(activity, 7).map((day) => h("i", { style: `background:${CONTRIB[day.level] ?? CONTRIB[0]}` }))));
+    }
+  }
+
+  const prs = pulse.myPrs;
+  const failing = prs.filter((p) => p.ci === "failure").length;
+  const pending = prs.filter((p) => p.ci === "pending").length;
+  const prValue = prs.length === 0 ? "0"
+    : failing > 0 ? `${prs.length} · ${failing} failing`
+    : pending > 0 ? `${prs.length} · running` : String(prs.length);
+
+  const main = worstCi(pulse.mainCi.map((r) => r.ci));
+  const [mainIcon, mainColor, mainValue] =
+    main === "failure" ? [ICONS.octagonX, CI_COLOR.failure, `${pulse.mainCi.filter((r) => r.ci === "failure").length} failing`]
+    : main === "pending" ? [ICONS.sealCheck, CI_COLOR.pending, "running"]
+    : main === "success" ? [ICONS.sealCheck, CI_COLOR.success, "all green"]
+    : [ICONS.sealCheck, CI_COLOR.unknown, pulse.mainCi.length ? "unknown" : "no repos"];
+
+  return h(
+    "div",
+    { class: "int-card" },
+    header("#F4505E", "GitHub", extra ? "" : "Overview", extra),
+    h(
+      "div",
+      { class: "int-stats gh-stats" },
+      statButton(svg(ICONS.pullRequest, 10, { stroke: 2 }), CI_COLOR[worstCi(prs.map((p) => p.ci))], "My PRs", prValue,
+        () => open("myPRs")),
+      statButton(svg(ICONS.eye, 10, { evenOdd: true }), pulse.toReview.length ? "#8AB4F8" : "#6B7079", "To review",
+        String(pulse.toReview.length), () => open("toReview")),
+      statButton(svg(mainIcon, 10, { evenOdd: true }), mainColor, "Default branch CI", mainValue, () => open("mainCI")),
+    ),
+  );
+}
+
+function prRow(pr: GitHubPR, showCi: boolean): HTMLElement {
+  const dotEl = dot(CI_COLOR[pr.ci], 5);
+  if (!showCi || pr.ci === "unknown") dotEl.style.opacity = "0";
+  return h(
+    "button",
+    { class: "gh-row", title: pr.title, onclick: () => openGitHub(pr.url) },
+    dotEl,
+    h("span", { class: "gh-ref", text: `${pr.repo.split("/").pop()}#${pr.number}` }),
+    h("span", { class: "gh-title", text: pr.title }),
+    pr.isDraft ? h("span", { class: "gh-draft", text: "Draft" }) : null,
+  );
+}
+
+function repoRow(repo: GitHubRepoCI): HTMLElement {
+  const word = { failure: "failing", pending: "running", success: "passing", unknown: "" }[repo.ci];
+  const dotEl = dot(CI_COLOR[repo.ci], 5);
+  if (repo.ci === "unknown") dotEl.style.opacity = "0";
+  return h(
+    "button",
+    { class: "gh-row", onclick: () => openGitHub(`${repo.url.replace(/\/$/, "")}/actions`) },
+    dotEl,
+    h("span", { class: "gh-ref", text: repo.repo.split("/").pop() ?? repo.repo }),
+    h("span", { class: "gh-title", text: repo.branch }),
+    word ? h("span", { class: "gh-word", style: `color:${CI_COLOR[repo.ci]}`, text: word }) : null,
+  );
+}
+
+function backHead(title: string, onBack: () => void, ...extra: Node[]): HTMLElement {
+  return h(
+    "div",
+    { class: "int-detail-head" },
+    h("button", { class: "int-back", onclick: onBack }, svg(ICONS.chevronLeft, 10, { stroke: 2.4 })),
+    h("b", { text: title }),
+    ...extra,
+  );
+}
+
+function githubDetail(section: GitHubSection, pulse: GitHubPulse, onBack: () => void): HTMLElement {
+  if (section === "activity") return githubActivityDetail(pulse, onBack);
+  const title = { myPRs: "My PRs", toReview: "To review", mainCI: "Default branch CI" }[section];
+  const rows = section === "mainCI"
+    ? pulse.mainCi.map(repoRow)
+    : (section === "myPRs" ? pulse.myPrs : pulse.toReview).map((pr) => prRow(pr, section === "myPRs"));
+  const list = rows.length
+    ? h("div", { class: rows.length > 3 ? "gh-list fade" : "gh-list" }, ...rows)
+    : h("div", { class: "gh-empty", text: "Nothing here" });
+  return h("div", { class: "int-card detail" }, backHead(title, onBack), list);
+}
+
+/** The contribution grid: 23 weeks; hover (or click) a day for its count. */
+function githubActivityDetail(pulse: GitHubPulse, onBack: () => void): HTMLElement {
+  const a = State.githubActivity;
+  const repos = get("integration_github").totalRepos;
+  const base = a ? `${a.total.toLocaleString("en-US")} past year${repos != null ? ` · ${repos} repos` : ""}` : "";
+  const label = h("button", {
+    class: "gh-activity-label",
+    text: base,
+    onclick: () => openGitHub(`https://github.com/${pulse.login}`),
+  });
+  const card = h("div", { class: "int-card detail" }, backHead("Activity", onBack, ...(a ? [label] : [])));
+  if (!a) {
+    card.append(h("div", { class: "gh-empty", text: "Loading…" }));
+    return card;
+  }
+  let pinned: string | null = null;
+  const grid = h("div", { class: "gh-grid" });
+  for (const week of a.weeks.slice(-ACTIVITY_WEEKS)) {
+    const col = h("div", { class: "gh-col" });
+    for (let dow = 0; dow < 7; dow++) {
+      const day = week.find((d) => d.weekday === dow);
+      const cell = h("i", { class: day ? "gh-day" : "gh-day empty" });
+      if (day) {
+        cell.style.background = CONTRIB[day.level] ?? CONTRIB[0];
+        cell.addEventListener("mouseenter", () => { label.textContent = dayLabel(day); });
+        cell.addEventListener("mouseleave", () => {
+          label.textContent = pinned ?? base;
+        });
+        cell.addEventListener("click", () => {
+          pinned = pinned === dayLabel(day) ? null : dayLabel(day);
+          label.textContent = pinned ?? base;
+        });
+      }
+      col.append(cell);
+    }
+    grid.append(col);
+  }
+  card.append(grid);
+  return card;
+}
+
 // ── Stripe ────────────────────────────────────────────────────────────────────
 
 function stripeCard(): HTMLElement {
@@ -548,6 +737,17 @@ function musicCard(): HTMLElement {
 
 export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHooks): HTMLElement {
   if (task.id === "integration_music" && State.music) return musicCard();
+  if (task.id === "integration_github" && State.githubPulse) {
+    // Opening the card (or a list) refreshes stale data; Rust decides what is stale.
+    const activity = hooks.detailOpen && githubSection === "activity";
+    void Bridge.githubRefresh(activity ? "activity" : "pulse");
+    return hooks.detailOpen
+      ? githubDetail(githubSection, State.githubPulse, hooks.closeDetail)
+      : githubPulseCard(State.githubPulse, (section) => {
+        githubSection = section;
+        hooks.openDetail();
+      });
+  }
   if (task.id === "integration_n8n") {
     const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
     return hooks.detailOpen && hasActivity

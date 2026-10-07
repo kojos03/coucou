@@ -4,7 +4,7 @@
 
 import { onEvent, Bridge, type IntegrationUpdate } from "../core/bridge";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, type GitHubActivity, type GitHubEvent, type GitHubPulse } from "../core/state";
 import type { Island } from "./island";
 
 /** Which Credential Manager key backs each pill. */
@@ -22,9 +22,51 @@ const clearTimers = new Map<string, number>();
 
 export function registerIntegrationHandlers(island: Island) {
   void onEvent<IntegrationUpdate>("integration", (update) => handle(island, update));
+  void onEvent<{ pulse: GitHubPulse | null; events: GitHubEvent[] }>("github-pulse", ({ pulse, events }) => {
+    State.githubPulse = pulse;
+    if (!State.paused && State.settings.activeIntegrations.includes("integration_github")) {
+      // Like the other pills here: show the compact island so the badge is seen.
+      gitHubAlert(events, () => island.reveal());
+    }
+    State.notify();
+  });
+  void onEvent<GitHubActivity | null>("github-activity", (activity) => {
+    State.githubActivity = activity;
+    State.notify();
+  });
+  void Bridge.githubLatest().then((latest) => {
+    State.githubPulse ??= latest?.pulse ?? null;
+    State.githubActivity ??= latest?.activity ?? null;
+    State.notify();
+  });
   // Settings installed, repaired or removed the Codex hooks.
   void onEvent<null>("codex-hooks-changed", () => void refreshCodexHooks());
   void refreshConfigured();
+}
+
+/**
+ * AppState.handleGitHubEvents: one badge and one sound for the lot, by priority
+ * (a red CI over a review request over a green CI). The badge only when the
+ * GitHub pill is not the one on screen.
+ */
+export function gitHubAlert(events: GitHubEvent[], onBadge?: (badge: "error" | "finished") => void) {
+  let level = 0;
+  let badge: "error" | "finished" | null = null;
+  let sound: string | null = null;
+  for (const e of events) {
+    if ((e.kind === "ciFailed" || e.kind === "mainFailed") && level < 3) {
+      level = 3; badge = "error"; sound = "error";
+    } else if (e.kind === "reviewRequested" && level < 2) {
+      level = 2; badge = "finished"; sound = "question";
+    } else if (e.kind === "ciPassed" && level < 1) {
+      level = 1; badge = "finished"; sound = "finish";
+    }
+  }
+  if (badge && State.focusId !== "integration_github") {
+    State.setPillBadge("integration_github", badge);
+    onBadge?.(badge);
+  }
+  if (sound) Sound.play(sound);
 }
 
 /** What the Codex card shows: whether the hooks are in place, and the app. */

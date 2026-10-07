@@ -56,6 +56,7 @@ installs for the current user only — no admin prompt.
 | Click Mochi | It gets annoyed. Three times in a row and it goes dizzy |
 | Rest the pointer on Mochi for two seconds | Hearts |
 | Turn on the **Music** pill (Settings → Integrations) | The pill names the song playing in any player Windows shows in its media controls (Spotify, Apple Music, a browser tab…), with play/pause and next on hover; its card adds the artist and previous. Mochi dances along on the small island and on the Music card |
+| Turn on the **GitHub** pill with a token | Its card shows your open pull requests and their checks, the pull requests waiting for your review, your default branches' CI, your stars and the last week of contributions. Click a line for its list (a row opens on GitHub), or the week for 23 weeks of activity. A failing or passing check, or a new review request, badges the pill |
 | Right-click Mochi | His wardrobe: hover an outfit to try it on, click to keep it. **Auto** follows the seasons (a witch hat in October, a Santa hat in December…) |
 | Drag a file onto the island | Mochi turns into a box, swallows it, then offers to answer questions about it |
 | `Esc` | Closes the island |

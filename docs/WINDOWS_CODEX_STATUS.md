@@ -1,6 +1,6 @@
 # Windows Codex integration: progress and next phases
 
-Last updated: 6 October 2026 (section 15: Claude Code in VS Code). On 5 October
+Last updated: 7 October 2026 (section 18: the GitHub pulse card). On 5 October
 **`windows-codex` became the latest working version** — everything from `windows-codex-claude` and `windows-plan-usage`
 (sections 7–14), with upstream Coucou 0.1.8 merged. The upstream review is in
 [UPSTREAM_INTEGRATION_PLAN.md](UPSTREAM_INTEGRATION_PLAN.md).
@@ -756,6 +756,60 @@ running app the pill appeared as "One More Time", Mochi danced on the compact
 island (frames captured), the card showed the song and artist, and its Pause
 button paused the session (the card then offered Play). The user's own pills
 were restored afterwards. Not verified with Spotify or a browser by hand.
+
+### 18. The GitHub pulse card (`windows-codex`, upstream #181, #185, #187)
+
+The GitHub pill's card is now a pulse of your work, as on macOS. It uses the
+same `github-token` in Credential Manager as the stats card it replaces (that
+card still shows until the first pulse arrives).
+
+- **My PRs**: your open pull requests, "3", "3 · running" or "3 · 1 failing"
+  from their checks; the icon takes the worst CI colour. **To review**: pull
+  requests waiting for your review. **Default branch CI**: the latest checks
+  on the default branch of your recently pushed repositories (archived ones
+  skipped): "all green", "running" or "2 failing".
+- The header shows your stars and the last seven days of contributions. A
+  click opens **Activity**: 23 weeks of the contribution calendar in GitHub's
+  colours and the year's total; hovering a day shows its count, a click pins
+  it, and the total opens your profile.
+- Each stat opens its list: 20 px rows, three visible and the rest scrolling
+  under a fade. A row opens the pull request, or the repository's Actions page,
+  in the browser; only github.com links are opened.
+- [github.rs](../windows/src-tauri/src/github.rs) ports `GitHubPulse.swift`,
+  `GitHubActivity.swift` and the GitHub half of `GithubPoller.swift` with the
+  same GraphQL queries. The pulse is fetched 10 s after start, then every 60 s
+  while a check is running and every 5 min otherwise; the activity 15 s after
+  start, then every 30 min. Both run only while the GitHub pill is on and
+  Coucou is not paused. Opening the card refreshes data older than 60 s (the
+  activity: 5 min); saving a new token clears both and fetches again.
+- Alerts compare each poll with the previous one by head commit, so a CI that
+  finishes between two polls still counts: a pull request's checks failing or
+  passing, a default branch failing, a new review request. One badge and one
+  sound per poll, by priority (red CI, then a review request, then green CI);
+  the badge only when the GitHub card is not on screen, and it reveals the
+  compact island. The first poll after launch never alerts.
+- Differences from macOS: the lists use the Windows detail header (the back
+  button of the other cards), and keyboard selection in the lists waits for the
+  keyboard shortcuts port.
+
+Verified: `npm test` (70, six new in `tests/github.test.mjs`: the card's
+values, each list and its links, the fade, the 23-week grid with hover and pin,
+the day labels, the alert priority and badge), `npx tsc --noEmit`, `cargo test
+-p coucou --lib --locked` (59, four new: both queries parsed like the Mac, the
+head-commit rules, staleness), a release build. With the user's own token in
+the running app: the card showed 3 PRs, 0 to review, "unknown" for seven
+repositories without checks, and the week; My PRs listed the three pull
+requests; Default branch CI listed the seven repositories under the fade;
+Activity drew 23 weeks with "115 past year · 13 repos" and a day's count on
+hover. Nine rounds through the three lists and back kept the GitHub card in
+focus. A long repository name pushed the title out of its row; a name now takes
+at most 60% of the row before it truncates. Not verified: an alert from a real
+CI change or review request (none happened during the test; the rules are
+covered by the Rust and JavaScript tests). Twice during the first live run the
+focus moved from the GitHub card to Codex or Claude Code with no hook event
+logged; it did not recur in the traced runs or a 25 s watch with no input, and
+the user was working at the time, so a click on the island is the likely cause,
+but it is unconfirmed.
 
 ## Where the implementation lives
 

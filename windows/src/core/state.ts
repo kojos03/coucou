@@ -146,6 +146,21 @@ export interface Settings {
 
 export const MUSIC_ID = "integration_music";
 
+/** GitHub pulse (github.rs): your pull requests, reviews and default-branch CI. */
+export type CiState = "pending" | "success" | "failure" | "unknown";
+export interface GitHubPR {
+  id: string; title: string; url: string; repo: string; number: number;
+  isDraft: boolean; ci: CiState; review: "approved" | "changesRequested" | "pending" | "unknown";
+  headSha: string | null;
+}
+export interface GitHubRepoCI { repo: string; url: string; branch: string; ci: CiState; headSha: string | null }
+export interface GitHubPulse {
+  login: string; myPrs: GitHubPR[]; toReview: GitHubPR[]; mainCi: GitHubRepoCI[]; fetchedAt: number;
+}
+export interface GitHubDay { date: string; count: number; level: number; weekday: number }
+export interface GitHubActivity { total: number; weeks: GitHubDay[][]; fetchedAt: number }
+export interface GitHubEvent { kind: "ciFailed" | "ciPassed" | "mainFailed" | "reviewRequested"; id: string }
+
 /** Windows' current media session, as music.rs reads it. */
 export interface NowPlaying {
   title: string;
@@ -213,6 +228,9 @@ class AppState {
   netSpeed: { down: number; up: number } | null = null;
   /** Whose plan card replaces the left card; any navigation closes it. */
   planDetail: "claude" | "codex" | null = null;
+  /** The GitHub card's pull requests and CI, and the contribution calendar. */
+  githubPulse: GitHubPulse | null = null;
+  githubActivity: GitHubActivity | null = null;
   /** What the Music pill's player is playing (null: nothing, or the pill is off). */
   music: NowPlaying | null = null;
   /** The outfit under the pointer in the wardrobe, worn until it leaves. */
